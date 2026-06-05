@@ -208,3 +208,46 @@ def test_vectorize_color_unreadable_raises(tmp_path):
     bad.write_bytes(b"notapng" * 16)
     with pytest.raises(ValueError):
         vz.vectorize_color(bad, output_path=tmp_path / "bad.svg")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CLI (spec: default intacto + política de flags fuera de modo)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_cli_default_mode_is_contour():
+    """El default del CLI sigue siendo contour (test explícito del spec)."""
+    args = vz.build_parser().parse_args(["x.png"])
+    assert args.mode == "contour"
+
+
+def test_cli_accepts_color_mode_and_flags():
+    args = vz.build_parser().parse_args(
+        ["x.png", "--mode", "color", "--preset", "logo",
+         "--colors", "7", "--speckle", "10", "--layer-diff", "32",
+         "--corner", "50", "--path-precision", "2", "--max-dim", "800"])
+    assert args.mode == "color"
+    assert args.preset == "logo"
+    assert args.colors == 7
+    assert args.speckle == 10
+    assert args.layer_diff == 32
+    assert args.corner == 50
+    assert args.path_precision == 2
+    assert args.max_dim == 800
+
+
+def test_inert_handwriting_flag_warns_in_color_mode(capsys):
+    args = vz.build_parser().parse_args(["x.png", "--mode", "color", "--rdp", "2.0"])
+    vz.warn_inert_flags(args)
+    assert "--rdp" in capsys.readouterr().out
+
+
+def test_inert_color_flag_warns_in_contour_mode(capsys):
+    args = vz.build_parser().parse_args(["x.png", "--speckle", "10"])
+    vz.warn_inert_flags(args)
+    assert "--speckle" in capsys.readouterr().out
+
+
+def test_no_warning_when_flags_match_mode(capsys):
+    args = vz.build_parser().parse_args(["x.png", "--mode", "color", "--speckle", "10"])
+    vz.warn_inert_flags(args)
+    assert "[WARN]" not in capsys.readouterr().out

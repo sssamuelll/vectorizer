@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 import argparse
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -641,15 +642,18 @@ def vectorize(image_path, output_path=None,
 # 8. MAIN
 # ═══════════════════════════════════════════════════════════════════
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
-        description="Vectoriza handwriting a SVG (contour + skeleton tracers)"
+        description="Vectoriza imágenes a SVG: handwriting (contour/skeleton) "
+                    "o color con vtracer (logos, ilustraciones, fotos)"
     )
     parser.add_argument("input", help="Imagen PNG/JPG o directorio")
     parser.add_argument("-o", "--output", help="SVG o directorio de salida")
-    parser.add_argument("--mode", choices=("contour", "skeleton", "both"),
+    parser.add_argument("--mode", choices=("contour", "skeleton", "both", "color"),
                         default="contour",
-                        help="contour=relleno fiel | skeleton=línea fina | both=ambos")
+                        help="contour=relleno fiel | skeleton=línea fina | "
+                             "both=ambos | color=vtracer full-color")
+    # flags handwriting (solo modos contour/skeleton/both)
     parser.add_argument("--blur", type=int, default=3)
     parser.add_argument("--rdp", type=float, default=1.0)
     parser.add_argument("--chaikin", type=int, default=2)
@@ -658,18 +662,79 @@ def main():
                         help="Stroke width for skeleton mode")
     parser.add_argument("--color", default=None, help="Forzar color hex")
     parser.add_argument("--no-auto-color", action="store_true")
+    # flags color (solo modo color)
+    parser.add_argument("--preset", choices=("logo", "drawing", "photo"),
+                        default=None,
+                        help="Preset del modo color (default: auto por "
+                             "colores efectivos; drawing solo manual)")
+    parser.add_argument("--colors", type=int, default=None,
+                        help="color_precision de vtracer")
+    parser.add_argument("--speckle", type=int, default=None,
+                        help="filter_speckle de vtracer")
+    parser.add_argument("--layer-diff", type=int, default=None,
+                        help="layer_difference de vtracer")
+    parser.add_argument("--corner", type=int, default=None,
+                        help="corner_threshold de vtracer")
+    parser.add_argument("--path-precision", type=int, default=None,
+                        help="Decimales de coordenadas en el SVG")
+    parser.add_argument("--max-dim", type=int, default=1200,
+                        help="Resize previo del modo color (0 = sin resize)")
+    return parser
 
-    args = parser.parse_args()
+
+_HANDWRITING_FLAG_DEFAULTS = {
+    "blur": 3, "rdp": 1.0, "chaikin": 2, "tension": 0.5,
+    "width": 2.0, "color": None, "no_auto_color": False,
+}
+_COLOR_FLAG_DEFAULTS = {
+    "preset": None, "colors": None, "speckle": None,
+    "layer_diff": None, "corner": None, "path_precision": None,
+    "max_dim": 1200,
+}
+
+
+def warn_inert_flags(args):
+    """Avisa de flags que no aplican al modo activo (spec: nada se ignora
+    en silencio). El flag inerte se reporta; no altera el resultado."""
+    inert = (_HANDWRITING_FLAG_DEFAULTS if args.mode == "color"
+             else _COLOR_FLAG_DEFAULTS)
+    for name, default in inert.items():
+        if getattr(args, name) != default:
+            print(f"  [WARN] --{name.replace('_', '-')} no aplica al modo "
+                  f"{args.mode}; ignorado.")
+
+
+def main():
+    args = build_parser().parse_args()
     input_path = Path(args.input)
     output_path = Path(args.output) if args.output else None
-    auto_color = not args.no_auto_color
-    fallback = args.color or "#1a1a1a"
 
-    common = dict(
-        mode=args.mode, blur=args.blur,
-        rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
-        stroke_width=args.width, auto_color=auto_color, fallback_color=fallback,
-    )
+    warn_inert_flags(args)
+
+    if args.mode == "color":
+        try:
+            import vtracer  # noqa: F401 — fail fast antes de procesar
+        except ImportError:
+            print("El modo color requiere vtracer. Instala con: pip install vtracer")
+            sys.exit(1)
+
+        def run_one(f, out):
+            return vectorize_color(
+                f, output_path=out, preset=args.preset, max_dim=args.max_dim,
+                filter_speckle=args.speckle, color_precision=args.colors,
+                layer_difference=args.layer_diff, corner_threshold=args.corner,
+                path_precision=args.path_precision,
+            )
+    else:
+        common = dict(
+            mode=args.mode, blur=args.blur,
+            rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
+            stroke_width=args.width, auto_color=not args.no_auto_color,
+            fallback_color=args.color or "#1a1a1a",
+        )
+
+        def run_one(f, out):
+            return vectorize(f, output_path=out, **common)
 
     if input_path.is_dir():
         exts = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
@@ -680,15 +745,20 @@ def main():
         out_dir = output_path or input_path / "svg_output"
         out_dir.mkdir(exist_ok=True)
         print(f"Procesando {len(files)} imágenes ({args.mode})...\n")
+        done, failed = 0, 0
         for i, f in enumerate(files, 1):
             print(f"[{i}/{len(files)}] {f.name}")
             try:
-                vectorize(f, output_path=out_dir / f.with_suffix(".svg").name, **common)
+                run_one(f, out_dir / f.with_suffix(".svg").name)
+                done += 1
             except Exception as e:
                 print(f"   [ERR] {e}")
+                failed += 1
             print()
+        # Resumen agregado: comportamiento NUEVO de Fase 1 (declarado en spec)
+        print(f"Resumen: {done} OK ({args.mode}), {failed} fallos.")
     else:
-        vectorize(input_path, output_path=output_path, **common)
+        run_one(input_path, output_path)
 
 
 if __name__ == "__main__":
