@@ -53,3 +53,54 @@ def test_match_candidate_insufficient_glyphs():
     crop = _render_word_bgr("m", WIN_FONTS / "georgia.ttf")
     glyphs = fi.segment_glyphs(crop)
     assert fi.match_candidate(glyphs, ["m"], WIN_FONTS / "georgia.ttf") is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DESCARGA VALIDADA (sin red: solo la validación; la descarga real
+# la ejercita la corrida del spike)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_validate_ttf_rejects_garbage(tmp_path):
+    """Bytes que no son TTF → False (no se cachearía)."""
+    bad = tmp_path / "fake.ttf"
+    bad.write_bytes(b"<html>error page</html>" * 10)
+    assert fi.validate_ttf(bad) is False
+
+
+def test_validate_ttf_accepts_real_font(tmp_path):
+    """Un TTF real del sistema pasa la validación."""
+    import shutil
+    real = tmp_path / "georgia.ttf"
+    shutil.copy(WIN_FONTS / "georgia.ttf", real)
+    assert fi.validate_ttf(real) is True
+
+
+# ═══════════════════════════════════════════════════════════════════
+# REGRESIÓN DEL NÚCLEO (recomendadas por el quality review de Task 1)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_iou_centroid_invariants():
+    """iou(a,a)=1.0; par de aspecto extremo queda en [0,1] sin crash."""
+    rng = np.random.default_rng(3)
+    a = rng.random((40, 25)) > 0.5
+    a[0, 0] = True                                  # garantiza no-vacía
+    assert fi._iou_centroid(a, a) == 1.0
+    tall = np.ones((100, 3), dtype=bool)
+    wide = np.ones((5, 80), dtype=bool)
+    v = fi._iou_centroid(tall, wide)
+    assert 0.0 <= v <= 1.0
+
+
+def test_common_scale_penalizes_proportion_mismatch():
+    """La conducta load-bearing del spike: estirar el crop 1.6x en x debe
+    BAJAR el score de la fuente correcta (el factor común no lo esconde).
+    Test que falsa, no que confirma (principio del spec)."""
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    glyphs = fi.segment_glyphs(crop)
+    base = fi.match_candidate(glyphs, list("mente"), WIN_FONTS / "georgia.ttf")
+    stretched = cv2.resize(crop, (int(crop.shape[1] * 1.6), crop.shape[0]),
+                           interpolation=cv2.INTER_CUBIC)
+    glyphs_s = fi.segment_glyphs(stretched)
+    assert len(glyphs_s) == 5
+    s = fi.match_candidate(glyphs_s, list("mente"), WIN_FONTS / "georgia.ttf")
+    assert s < base - 0.1     # la distorsión se penaliza, no se normaliza

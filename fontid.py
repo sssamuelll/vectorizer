@@ -13,6 +13,7 @@ import argparse
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -134,3 +135,58 @@ def match_candidate(crop_glyphs, chars, ttf_path, base_size=96):
     if len(ious) >= 4:
         ious = ious[1:]  # descarta el peor glifo
     return float(np.mean(ious))
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3. DESCARGA DE TTF (hecho runtime 3 del spec: el UA por defecto de
+#    urllib entrega TTF directo — el "truco UA legacy" del v1 estaba
+#    invertido y NO se usa. Validación antes de cachear + escritura
+#    atómica: nunca queda un TTF a medias o corrupto en caché.)
+# ═══════════════════════════════════════════════════════════════════
+
+GF_CSS2 = "https://fonts.googleapis.com/css2?family={}"
+TTF_MAGICS = (b"\x00\x01\x00\x00", b"OTTO", b"true")
+
+
+def validate_ttf(path):
+    """Magic bytes + apertura efectiva con Pillow. True si es usable."""
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return False
+    if not any(data.startswith(m) for m in TTF_MAGICS):
+        return False
+    try:
+        ImageFont.truetype(str(path), 24)
+    except Exception:
+        return False
+    return True
+
+
+def download_ttf(family, cache_dir):
+    """Descarga el TTF regular de una familia GF a la caché.
+
+    Devuelve la ruta cacheada, o None si la red/validación falla
+    (el caller cuenta las omitidas y sigue — spec, tabla de errores).
+    """
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(exist_ok=True)
+    dest = cache_dir / (family.replace(" ", "_") + ".ttf")
+    if dest.exists():
+        return dest
+    try:
+        url = GF_CSS2.format(urllib.parse.quote_plus(family))
+        css = urllib.request.urlopen(url, timeout=20).read().decode("utf-8")
+        m = re.search(r"url\((https://[^)]+\.ttf)\)", css)
+        if not m:
+            return None
+        data = urllib.request.urlopen(m.group(1), timeout=30).read()
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    tmp = dest.with_suffix(".tmp")
+    tmp.write_bytes(data)
+    if not validate_ttf(tmp):
+        tmp.unlink(missing_ok=True)
+        return None
+    os.replace(tmp, dest)  # escritura atómica (spec)
+    return dest
