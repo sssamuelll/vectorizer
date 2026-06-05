@@ -264,3 +264,39 @@ def test_weight_probing_real_garalda(tmp_path):
         weights = fi.download_family_weights(fam, tmp_path)
         assert len(weights) >= min_expected, f"{fam}: {weights}"
         assert all(p.exists() for _, p in weights)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — OCR Y REGIONES (spec: negociación de idioma, hechos 1-2)
+# ═══════════════════════════════════════════════════════════════════
+
+winocr_available = True
+try:
+    import winocr  # noqa: F401
+except ImportError:
+    winocr_available = False
+
+needs_ocr = pytest.mark.skipif(not winocr_available, reason="winocr no instalado")
+
+
+@needs_ocr
+def test_negotiate_language_returns_available():
+    lang = fi.negotiate_ocr_language()
+    assert isinstance(lang, str) and len(lang) >= 2
+
+
+@needs_ocr
+def test_detect_regions_two_lines(tmp_path):
+    """Dos líneas de texto → dos regiones con texto y bbox absolutas."""
+    font = ImageFont.truetype(str(WIN_FONTS / "georgia.ttf"), 60)
+    img = Image.new("L", (900, 260), 255)
+    d = ImageDraw.Draw(img)
+    d.text((40, 30), "mente sana", fill=0, font=font)
+    d.text((40, 150), "cuerpo sano", fill=0, font=font)
+    bgr = cv2.cvtColor(np.array(img), cv2.COLOR_GRAY2BGR)
+    regions = fi.detect_regions(bgr)
+    assert len(regions) == 2
+    texts = [r["text"].lower() for r in regions]
+    assert "mente" in texts[0] and "cuerpo" in texts[1]
+    x0, y0, x1, y1 = regions[0]["bbox"]
+    assert 0 <= x0 < x1 <= 900 and 0 <= y0 < y1 <= 260

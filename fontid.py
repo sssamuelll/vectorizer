@@ -507,3 +507,87 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3d. OCR Y REGIONES (Fase A — Windows-only; el flujo manual
+#     --region/--text funciona en cualquier SO)
+# ═══════════════════════════════════════════════════════════════════
+
+LATIN_PREFIXES = ("en", "es", "fr", "de", "it", "pt", "nl", "ca")
+OCR_INSTALL_HINT = (
+    "No hay ningún language pack OCR de script latino instalado.\n"
+    "Instala uno (PowerShell como admin):\n"
+    '  Add-WindowsCapability -Online -Name "Language.OCR~~~es-ES~0.0.1.0"')
+
+
+def negotiate_ocr_language():
+    """Primer recognizer de script latino DISPONIBLE — jamás hardcodear
+    'en' (hecho runtime 1: esta máquina solo tiene es-ES/es-MX y lang='en'
+    lanza AssertionError).
+
+    Usa winrt (no winsdk) — forma verificada en esta máquina.
+    available_recognizer_languages es property, no callable getter.
+    """
+    from winrt.windows.media.ocr import OcrEngine  # import lazy
+    langs = OcrEngine.available_recognizer_languages
+    tags = [l.language_tag for l in langs]
+    for tag in tags:
+        if tag.split("-")[0].lower() in LATIN_PREFIXES:
+            return tag
+    raise RuntimeError(OCR_INSTALL_HINT + f"\nDisponibles: {tags or 'ninguno'}")
+
+
+def detect_regions(img_bgr):
+    """OCR → una región por LÍNEA detectada (criterio de agrupación
+    declarado: líneas distintas suelen ser fuentes distintas en un logo).
+
+    Devuelve [{'bbox': (x0,y0,x1,y1) ABSOLUTAS, 'text': str,
+               'word_boxes': [(x0,y0,x1,y1), ...]}].
+
+    API winocr verificada en runtime: recognize_cv2_sync devuelve siempre
+    dicts (picklify convierte los objetos winrt). bounding_rect es un dict
+    con claves 'x', 'y', 'width', 'height' como floats.
+
+    Limitación documentada (hecho runtime 2): el OCR puede NO emitir
+    región para texto caligráfico — el caller imprime el aviso fijo.
+    """
+    if sys.platform != "win32":
+        raise RuntimeError(
+            "La detección automática usa el OCR nativo de Windows (winocr) "
+            "y es Windows-only. Usa --region/--text en este SO.")
+    try:
+        import winocr
+    except ImportError:
+        raise RuntimeError(
+            "El flujo automático requiere winocr. Instala con: "
+            "pip install winocr  (o usa --region/--text)") from None
+    lang = negotiate_ocr_language()
+    try:
+        result = winocr.recognize_cv2_sync(img_bgr, lang)
+    except Exception as e:
+        raise RuntimeError(
+            f"El OCR falló en runtime ({e}). Fallback: pasa las regiones a "
+            "mano con --region/--text.") from None
+
+    regions = []
+    # winocr.picklify siempre produce dicts — no hay objetos winrt aquí
+    lines = result["lines"] if isinstance(result, dict) else result.lines
+    for line in lines:
+        words = line["words"] if isinstance(line, dict) else line.words
+        boxes = []
+        for w in words:
+            r = w["bounding_rect"] if isinstance(w, dict) else w.bounding_rect
+            x = int(r["x"] if isinstance(r, dict) else r.x)
+            y = int(r["y"] if isinstance(r, dict) else r.y)
+            ww = int(r["width"] if isinstance(r, dict) else r.width)
+            hh = int(r["height"] if isinstance(r, dict) else r.height)
+            boxes.append((x, y, x + ww, y + hh))
+        if not boxes:
+            continue
+        text = line["text"] if isinstance(line, dict) else line.text
+        x0 = min(b[0] for b in boxes); y0 = min(b[1] for b in boxes)
+        x1 = max(b[2] for b in boxes); y1 = max(b[3] for b in boxes)
+        regions.append({"bbox": (x0, y0, x1, y1), "text": text,
+                        "word_boxes": boxes})
+    return regions
