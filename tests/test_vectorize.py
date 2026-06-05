@@ -251,3 +251,21 @@ def test_no_warning_when_flags_match_mode(capsys):
     args = vz.build_parser().parse_args(["x.png", "--mode", "color", "--speckle", "10"])
     vz.warn_inert_flags(args)
     assert "[WARN]" not in capsys.readouterr().out
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MODO DIRECTORIO (spec: batch continúa, resumen nuevo)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_batch_continues_after_corrupt_file(tmp_path, monkeypatch, capsys):
+    """'bad.png' (bytes corruptos, ordena primero) no detiene el batch:
+    'good.png' se procesa igual y el resumen cuenta el fallo."""
+    (tmp_path / "bad.png").write_bytes(b"notapng" * 16)
+    make_logo(tmp_path / "good.png")
+    monkeypatch.setattr(sys, "argv",
+                        ["vectorize.py", str(tmp_path), "--mode", "color"])
+    vz.main()
+    assert (tmp_path / "svg_output" / "good.svg").exists()
+    out = capsys.readouterr().out
+    assert "1 OK" in out
+    assert "1 fallos" in out
