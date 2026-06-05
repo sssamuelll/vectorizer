@@ -309,26 +309,33 @@ def test_detect_regions_two_lines(tmp_path):
 def test_classify_typeset_line_scores_type():
     """Línea renderizada con fuente → lado tipografía, con stats crudas."""
     crop = _render_word_bgr("mente sana", WIN_FONTS / "georgia.ttf")
-    glyphs = fi.segment_glyphs_fused(crop)
-    c = fi.classify_region(glyphs, "mente sana")
+    masks, boxes = fi.segment_glyphs_with_boxes(crop)
+    c = fi.classify_region(masks, "mente sana", boxes=boxes)
     assert c["label"] == "type"
-    assert "baseline_residual" in c and "height_var" in c
+    assert c["baseline_mode"] == "absolute"
     assert 0.0 <= c["score"] <= 1.0
 
 
+def test_classify_descenders_still_type():
+    """Palabra CON descendentes y ascendentes ('juega bien') → type igual
+    (el defecto estructural que motivó esta enmienda)."""
+    crop = _render_word_bgr("juega bien", WIN_FONTS / "georgia.ttf")
+    masks, boxes = fi.segment_glyphs_with_boxes(crop)
+    c = fi.classify_region(masks, "juega bien", boxes=boxes)
+    assert c["label"] == "type", c
+
+
 def test_classify_jittered_glyphs_scores_handwriting_side():
-    """Glifos con jitter vertical y de escala (simula mano) → score más bajo
-    que la versión tipográfica de la misma palabra."""
+    """Jitter vertical y de escala sobre cajas absolutas → score más bajo."""
     crop = _render_word_bgr("mente sana", WIN_FONTS / "georgia.ttf")
-    clean = fi.classify_region(fi.segment_glyphs_fused(crop), "mente sana")
+    masks, boxes = fi.segment_glyphs_with_boxes(crop)
+    clean = fi.classify_region(masks, "mente sana", boxes=boxes)
     rng = np.random.default_rng(11)
-    jittered = []
-    for g in fi.segment_glyphs_fused(crop):
-        scale = rng.uniform(0.7, 1.4)
-        h = max(2, int(g.shape[0] * scale)); w = max(2, int(g.shape[1] * scale))
-        m = cv2.resize(g.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST) > 0
-        pad_top = int(rng.uniform(0, 18))
-        m = np.vstack([np.zeros((pad_top, m.shape[1]), bool), m])
-        jittered.append(m)
-    jit = fi.classify_region(jittered, "mente sana")
+    jit_boxes = []
+    for (x0, y0, x1, y1) in boxes:
+        dy = int(rng.uniform(-14, 14))
+        sc = rng.uniform(0.7, 1.4)
+        h = max(2, int((y1 - y0) * sc))
+        jit_boxes.append((x0, y0 + dy, x1, y0 + dy + h))
+    jit = fi.classify_region(masks, "mente sana", boxes=jit_boxes)
     assert jit["score"] < clean["score"]

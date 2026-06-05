@@ -66,8 +66,13 @@ def _x_overlap(a, b):
     return (hi - lo) / min(a[1] - a[0], b[1] - b[0])
 
 
-def segment_glyphs_fused(crop_bgr, min_area=4, overlap_frac=0.5):
+def segment_glyphs_with_boxes(crop_bgr, min_area=4, overlap_frac=0.5):
     """Segmentación Fase A: componentes conexos + fusión vertical.
+
+    Como segment_glyphs_fused pero devuelve (masks, boxes) donde
+    boxes = [(x0, y0, x1, y1)] ABSOLUTAS dentro del crop — la posición
+    vertical real que la clasificación necesita (las máscaras tight no
+    conservan dónde estaba el glifo).
 
     Componentes cuyo rango x se solapa ≥ overlap_frac con otro (punto de
     la i/j, acentos) se fusionan en un solo glifo (spec, hecho runtime 5:
@@ -78,7 +83,7 @@ def segment_glyphs_fused(crop_bgr, min_area=4, overlap_frac=0.5):
     _, binary = cv2.threshold(gray, 0, 255, flag | cv2.THRESH_OTSU)
     n, labels, stats, _ = cv2.connectedComponentsWithStats(
         (binary > 0).astype(np.uint8), connectivity=8)
-    boxes = []  # (x0, x1, y0, y1, comp_ids)
+    boxes = []  # (x0, x1, y0, y1, comp_ids)  — orden interno del algoritmo
     for i in range(1, n):
         x, y, w, h, area = stats[i]
         if area < min_area:
@@ -96,11 +101,16 @@ def segment_glyphs_fused(crop_bgr, min_area=4, overlap_frac=0.5):
         else:
             fused.append(b)
 
-    glyphs = []
+    masks, out_boxes = [], []
     for x0, x1, y0, y1, ids in fused:
-        m = np.isin(labels[y0:y1, x0:x1], ids)
-        glyphs.append(m)
-    return glyphs
+        masks.append(np.isin(labels[y0:y1, x0:x1], ids))
+        out_boxes.append((x0, y0, x1, y1))   # reordenado a orden estándar (x0,y0,x1,y1)
+    return masks, out_boxes
+
+
+def segment_glyphs_fused(crop_bgr, min_area=4, overlap_frac=0.5):
+    """Wrapper de compatibilidad: solo las máscaras."""
+    return segment_glyphs_with_boxes(crop_bgr, min_area, overlap_frac)[0]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -607,43 +617,73 @@ _RESIDUAL_NORM_PX = 4.0         # residuo de baseline que ya cuenta como irregul
 _HEIGHT_VAR_NORM = 0.35         # variación relativa de altura idem
 
 
-def classify_region(glyph_masks, text):
+DESCENDERS = set("gjpqy")
+_XHEIGHT_CHARS = set("aceimnorsuvwxz")
+
+
+def classify_region(glyph_masks, text, boxes=None):
     """Score escalar tipografía↔handwriting con estadísticas crudas.
 
-    Señales: (1) residuo robusto de baseline (P90 de bottoms + MAD del fit
-    lineal — robusto a serifas y descendentes), (2) variación relativa de
-    altura, (3) repetición de formas SOLO si el texto tiene letras repetidas
-    (declarado en el resultado).
+    Señales (todas crudas en el dict, sin calibración — el spec lo declara):
+    1. Residuo de baseline sobre bottoms ABSOLUTOS (requiere boxes),
+       excluyendo descendentes (g/j/p/q/y) cuando el texto alinea con los
+       glifos — un descendente legítimo no es irregularidad.
+    2. Variación relativa de altura sobre chars de x-height cuando el texto
+       alinea (mezclar ascendentes con x-height no es irregularidad).
+    3. Repetición de formas SOLO si hay letras repetidas.
+    Sin boxes (modo degradado, p.ej. tests sintéticos), 1 usa los bottoms
+    locales (altura) — declarado en el dict como baseline_mode='local'.
     """
+    base = {"label": "uncertain", "score": 0.5, "baseline_residual": 0.0,
+            "height_var": 0.0, "repeats_used": False,
+            "baseline_mode": "absolute" if boxes else "local"}
     if len(glyph_masks) < 2:
-        return {"label": "uncertain", "score": 0.5, "baseline_residual": 0.0,
-                "height_var": 0.0, "repeats_used": False,
-                "note": "región con <2 glifos — señales insuficientes"}
+        base["note"] = "región con <2 glifos — señales insuficientes"
+        return base
 
-    bottoms, heights, xs = [], [], []
-    x_cursor = 0
-    for m in glyph_masks:
-        ys, _ = np.where(m)
-        # P90, no max: las serifas profundas (p.ej. la 'n' de Georgia) no son el baseline
-        bottoms.append(float(np.percentile(ys, 90)))
-        heights.append(float(m.shape[0]))
-        xs.append(float(x_cursor)); x_cursor += m.shape[1]
-    bottoms, heights, xs = map(np.array, (bottoms, heights, xs))
+    chars = [c for c in text.lower() if not c.isspace()]
+    aligned = len(chars) == len(glyph_masks)
 
-    coef = np.polyfit(xs, bottoms, 1)
-    dev = bottoms - np.polyval(coef, xs)
-    # MAD escalada (~std bajo normalidad), robusta a los pocos
-    # descendentes legítimos (g/p/y) de un texto tipográfico real
+    # --- bottoms y alturas
+    if boxes:
+        bottoms = np.array([float(b[3]) for b in boxes])
+        heights = np.array([float(b[3] - b[1]) for b in boxes])
+        xs = np.array([float(b[0]) for b in boxes])
+    else:
+        bottoms, heights, xs = [], [], []
+        x_cursor = 0
+        for m in glyph_masks:
+            ys, _ = np.where(m)
+            bottoms.append(float(np.percentile(ys, 90)))
+            heights.append(float(m.shape[0]))
+            xs.append(float(x_cursor)); x_cursor += m.shape[1]
+        bottoms, heights, xs = map(np.array, (bottoms, heights, xs))
+
+    # --- señal 1: baseline (excluye descendentes si el texto alinea)
+    keep = np.ones(len(bottoms), dtype=bool)
+    if aligned:
+        keep = np.array([c not in DESCENDERS for c in chars])
+        if keep.sum() < 2:
+            keep = np.ones(len(bottoms), dtype=bool)
+    coef = np.polyfit(xs[keep], bottoms[keep], 1)
+    dev = bottoms[keep] - np.polyval(coef, xs[keep])
     residual = float(1.4826 * np.median(np.abs(dev - np.median(dev))))
-    height_var = float(np.std(heights) / max(np.mean(heights), 1e-6))
+
+    # --- señal 2: altura (solo x-height chars si el texto alinea)
+    hsel = np.ones(len(heights), dtype=bool)
+    if aligned:
+        hx = np.array([c in _XHEIGHT_CHARS for c in chars])
+        if hx.sum() >= 2:
+            hsel = hx
+    height_var = float(np.std(heights[hsel]) / max(np.mean(heights[hsel]), 1e-6))
 
     s_base = max(0.0, 1.0 - residual / _RESIDUAL_NORM_PX)
     s_height = max(0.0, 1.0 - height_var / _HEIGHT_VAR_NORM)
     parts = [s_base, s_height]
 
-    chars = [c for c in text.lower() if not c.isspace()]
+    # --- señal 3: repetición (igual que antes)
     repeats_used = False
-    if len(chars) == len(glyph_masks):
+    if aligned:
         idx = defaultdict(list)
         for i, c in enumerate(chars):
             idx[c].append(i)
@@ -660,9 +700,13 @@ def classify_region(glyph_masks, text):
             parts.append(float(np.mean(rep_ious)))
 
     score = float(np.mean(parts))
-    label = ("type" if score >= CLASSIFY_TYPE_CUT
-             else "handwriting" if score <= CLASSIFY_HAND_CUT
-             else "uncertain")
-    return {"label": label, "score": round(score, 3),
-            "baseline_residual": round(residual, 2),
-            "height_var": round(height_var, 3), "repeats_used": repeats_used}
+    base.update({
+        "label": ("type" if score >= CLASSIFY_TYPE_CUT
+                  else "handwriting" if score <= CLASSIFY_HAND_CUT
+                  else "uncertain"),
+        "score": round(score, 3),
+        "baseline_residual": round(residual, 2),
+        "height_var": round(height_var, 3),
+        "repeats_used": repeats_used,
+    })
+    return base
