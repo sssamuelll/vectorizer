@@ -58,9 +58,10 @@ Heurística del router, en orden:
 1. **Downscale** a ≤256px (lado mayor) para análisis rápido.
 2. **Alpha real:** si la imagen trae canal alpha con píxeles transparentes → `graphic`.
    Los scans de handwriting no traen alpha; los logos PNG sí, constantemente.
-3. **Colores efectivos:** k-means (k=8, espacio LAB, píxeles muestreados) → contar cuántos
+3. **Colores efectivos:** k-means (k=16, espacio LAB, píxeles muestreados) → contar cuántos
    clusters se necesitan para cubrir el 95% de los píxeles. **≥3 colores efectivos →
-   `graphic`.**
+   `graphic`.** (k=16 y no menos porque estas mismas estadísticas deciden el preset
+   logo/photo con umbral en 12 — ver Componente 2.)
 4. **Caso 2 colores** (tinta + fondo — podría ser handwriting o un logo monocromo):
    estimar **grosor medio del trazo** = área de tinta ÷ longitud del skeleton (ambos a la
    escala de análisis). Grosor medio ≤ 5px → `handwriting`; > 5px → `graphic`.
@@ -100,8 +101,10 @@ Wrapper de vtracer:
 | `drawing` | ilustraciones con sombras/gradientes suaves | `filter_speckle=4`, `color_precision=7`, `layer_difference=24`, `corner_threshold=60`, `mode=spline`, `hierarchical=stacked`, `path_precision=3` |
 | `photo` | fotos → posterización fiel | `filter_speckle=4`, `color_precision=8`, `layer_difference=12`, `corner_threshold=60`, `mode=spline`, `hierarchical=stacked`, `path_precision=3` |
 
-Sin `--preset` explícito, se elige solo reusando las estadísticas del detector:
+Sin `--preset` explícito, se elige solo con las estadísticas de colores efectivos:
 **≤12 colores efectivos → `logo`, >12 → `photo`**. `drawing` solo se activa manualmente.
+Con `--mode color` forzado (routing sin correr), el análisis de colores efectivos se ejecuta
+igual — solo para elegir preset.
 Los valores de los presets son punto de partida; se ajustan durante la implementación con
 imágenes reales si hace falta.
 
@@ -120,7 +123,7 @@ imágenes reales si hace falta.
 | `--layer-diff N` | `layer_difference` |
 | `--corner N` | `corner_threshold` |
 | `--path-precision N` | `path_precision` |
-| `--max-dim N` | resize previo (0 = sin resize) |
+| `--max-dim N` | resize previo (0 = sin resize) — **solo pipeline color**; handwriting conserva su constante de 1200px (cero regresión) |
 
 - Los flags existentes (`--blur`, `--rdp`, `--chaikin`, `--tension`, `--width`, `--color`,
   `--no-auto-color`) siguen aplicando **solo** a los modos handwriting.
@@ -146,7 +149,7 @@ commiteados. `tests/test_vectorize.py`.
 | grupo | qué verifica |
 |---|---|
 | Router | trazos finos curvos sobre blanco → `handwriting`; logo plano 4 colores → `graphic`; gradiente → `graphic`; PNG con alpha transparente → `graphic`; logo negro sólido (2 colores, bloques gruesos) → `graphic` (el caso trampa) |
-| Pipeline color | logo sintético → SVG parsea como XML válido, ≥N paths con fills distintos, root con width/height originales |
+| Pipeline color | logo sintético de 4 colores → SVG parsea como XML válido, ≥3 fills distintos entre sus paths, root con width/height originales |
 | Resize | imagen >1200px → viewBox en dims de trabajo, width/height originales |
 | Overrides CLI | `--mode color` fuerza color sobre handwriting; `--mode contour` fuerza handwriting sobre un logo |
 | Regresión | imagen handwriting vía `auto` produce el mismo SVG que `--mode contour` |
