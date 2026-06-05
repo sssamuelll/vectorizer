@@ -365,3 +365,78 @@ def test_merge_nominations_marks_and_prioritizes():
     assert merged[0] == "Cormorant SC"          # nominada primero
     assert merged.count("Lora") == 1            # sin duplicados
     assert api_set == {"Cormorant SC"}          # solo lo NUEVO se marca [API]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — RANKING V2, JSON DRAFT, PREVIEW, CLI V2
+# ═══════════════════════════════════════════════════════════════════
+
+def _local_pool_dir(tmp_path):
+    """Pool local de 3 fuentes del sistema como (familia → [(400, path)])."""
+    import shutil
+    d = tmp_path / "fonts"; d.mkdir()
+    fams = {}
+    for fam, fname in [("Georgia", "georgia.ttf"), ("Times", "times.ttf"),
+                       ("Arial", "arial.ttf")]:
+        p = d / f"{fam}_400.ttf"
+        shutil.copy(WIN_FONTS / fname, p)
+        fams[fam] = [(400, p)]
+    return fams
+
+
+def test_rank_region_v2_structure(tmp_path):
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    glyphs = fi.segment_glyphs_fused(crop)
+    rows = fi.rank_families(glyphs, list("mente"), _local_pool_dir(tmp_path),
+                            api_set=set())
+    assert rows[0]["family"] == "Georgia"
+    r = rows[0]
+    assert {"family", "overlap", "wght", "scale", "api"} <= set(r)
+    assert 0.0 <= r["overlap"] <= 1.0 and r["wght"] == 400 and r["api"] is False
+
+
+def test_json_draft_contract(tmp_path):
+    """El JSON: bboxes absolutas, sin '%', deltas, empates, wght, scale."""
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    glyphs = fi.segment_glyphs_fused(crop)
+    rows = fi.rank_families(glyphs, list("mente"), _local_pool_dir(tmp_path),
+                            api_set=set())
+    doc = fi.build_json_draft([{
+        "bbox": (450, 600, 1050, 770), "text": "mente",
+        "classification": {"label": "type", "score": 0.9,
+                           "baseline_residual": 1.0, "height_var": 0.05,
+                           "repeats_used": True},
+        "rows": rows, "skipped": 0,
+    }])
+    s = json.dumps(doc, ensure_ascii=False)
+    assert "%" not in s
+    reg = doc["regions"][0]
+    assert reg["bbox"] == [450, 600, 1050, 770]          # absolutas
+    assert doc["draft"] is True                            # emisión draft, no contrato
+    top = reg["candidates"][0]
+    assert {"family", "overlap", "delta_to_next", "tie_with_leader",
+            "wght", "scale", "api"} <= set(top)
+
+
+def test_preview_strip_written(tmp_path):
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    glyphs = fi.segment_glyphs_fused(crop)
+    fams = _local_pool_dir(tmp_path)            # deja Georgia_400.ttf en tmp_path/fonts
+    rows = fi.rank_families(glyphs, list("mente"), fams, api_set=set())
+    out = tmp_path / "prev.png"
+    fi.write_preview(crop, "mente", rows[:3], out, cache_dir=tmp_path / "fonts")
+    assert out.exists() and out.stat().st_size > 1000
+
+
+def test_cli_v2_flags_parse():
+    args = fi.build_parser().parse_args(
+        ["x.png", "--pool", "40", "--category", "serif", "--api",
+         "--json", "--preview"])
+    assert args.pool == 40 and args.category == "serif"
+    assert args.api is True and args.json is True and args.preview is True
+
+
+def test_cli_manual_mode_still_works():
+    args = fi.build_parser().parse_args(
+        ["x.png", "--region", "0,0,9,9", "--text", "ab"])
+    fi.validate_args(args)   # no SystemExit

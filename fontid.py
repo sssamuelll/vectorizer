@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -444,32 +445,126 @@ def rank_region(crop_bgr, text, cache_dir):
     return ranked, controls, skipped, None
 
 
-def print_region_report(idx, text, ranked, controls, skipped, mismatch):
-    print(f"\n[REGIÓN {idx}] \"{text}\"")
-    if mismatch:
-        print(f"  segmentación≠texto ({mismatch[0]} glifos vs {mismatch[1]} chars)"
-              f" — no se rankea. ¿Puntos/acentos? (límite del spike)")
+def print_region_report(idx, reg):
+    cls = reg["classification"]
+    print(f"\n[REGIÓN {idx}] \"{reg['text']}\" — {cls['label']} "
+          f"(score {cls['score']}, baseline res={cls['baseline_residual']}px, "
+          f"var. altura={cls['height_var']}"
+          f"{', repetición usada' if cls.get('repeats_used') else ''})")
+    if cls["label"] == "handwriting":
+        print("  → se vectoriza, no se aproxima (territorio de vectorize.py)")
         return
-    if not ranked:
+    if cls["label"] == "uncertain":
+        print("  banda incierta — revisa el crop o fuerza con --region/--text")
+    rows = reg["rows"]
+    if not rows:
         print("  sin candidatas rankeables")
         return
-    ties = tie_flags(ranked)
-    best_control = controls[0][1] if controls else 0.0
-    sep = ranked[0][1] - best_control
-    # Spec (gate condición 1): margen serif-vs-sans esperado ~0.2 (hecho runtime 6).
-    band = "OK" if sep > 0.2 else ("MARGINAL" if sep > 0.1 else "DÉBIL")
-    print(f"  separación del cluster vs controles: {sep:.3f} "
-          f"({band} — gate condición 1)")
+    # Separación por cluster (spec, reporte de dos niveles): el pool mezcla
+    # categorías GF, así que el mejor de OTRA categoría es la línea base —
+    # no hacen falta controles artificiales como en el spike.
+    leader_cat = rows[0].get("category")
+    others = [r["overlap"] for r in rows if r.get("category") not in (leader_cat, None)]
+    if leader_cat and others:
+        sep = rows[0]["overlap"] - max(others)
+        band = "OK" if sep > 0.2 else ("MARGINAL" if sep > 0.1 else "DÉBIL")
+        print(f"  cluster: {leader_cat} — separación vs mejor de otra "
+              f"categoría: {sep:.3f} ({band})")
+    ties = tie_flags([(r["family"], r["overlap"]) for r in rows])
     prev = None
-    for i, ((fam, s), tie) in enumerate(zip(ranked[:5], ties[:5]), 1):
-        delta = f"   Δ {prev - s:.3f}" if prev is not None else ""
+    for i, (r, tie) in enumerate(zip(rows[:5], ties[:5]), 1):
+        delta = f"   Δ {prev - r['overlap']:.3f}" if prev is not None else ""
         mark = "  → EMPATE con el líder" if tie else ""
-        print(f"  {i}. {fam:<22s} overlap {s:.3f}{delta}{mark}")
-        prev = s
-    for fam, s in controls:
-        print(f"  [control] {fam:<14s} overlap {s:.3f}")
-    if skipped:
-        print(f"  ({skipped} candidatas omitidas por red/validación)")
+        api = "  [API]" if r["api"] else ""
+        print(f"  {i}. {r['family']:<24s} overlap {r['overlap']:.3f} "
+              f"(wght {r['wght']}){delta}{mark}{api}")
+        prev = r["overlap"]
+    if reg.get("skipped"):
+        print(f"  ({reg['skipped']} candidatas omitidas por red/validación)")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 4b. RANKING V2, JSON DRAFT Y PREVIEW (Fase A)
+# ═══════════════════════════════════════════════════════════════════
+
+DOWNLOAD_WORKERS = 8     # presupuesto del spec: descarga paralela; el OCR
+                         # NUNCA se paraleliza (asyncio.run, hecho runtime 5)
+
+
+def prepare_pool_weights(families, cache_dir):
+    """Descarga (paralela, atómica) los pesos de cada familia.
+    → dict familia → [(wght, Path)] (vacío = omitida por red)."""
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as ex:
+        results = ex.map(lambda f: (f, download_family_weights(f, cache_dir)),
+                         families)
+    return dict(results)
+
+
+def rank_families(crop_glyphs, chars, family_weights, api_set):
+    """→ filas ordenadas desc: {family, overlap, wght, scale, api}."""
+    rows = []
+    for fam, weights in family_weights.items():
+        if not weights:
+            continue
+        best = match_family_local(crop_glyphs, chars, weights)
+        if best is None:
+            continue
+        score, wght, s = best
+        rows.append({"family": fam, "overlap": round(score, 3), "wght": wght,
+                     "scale": round(s, 4), "api": fam in api_set})
+    rows.sort(key=lambda r: -r["overlap"])
+    return rows
+
+
+def build_json_draft(regions):
+    """Emisión draft (spec Fase B condición 3: NO es contrato hasta que
+    Fase B firme sus requisitos). Sin '%', bboxes absolutas, wght y scale
+    registrados por candidata."""
+    out_regions = []
+    for reg in regions:
+        rows = reg["rows"]
+        ties = tie_flags([(r["family"], r["overlap"]) for r in rows])
+        cands = []
+        for i, (r, tie) in enumerate(zip(rows, ties)):
+            delta = (round(rows[i - 1]["overlap"] - r["overlap"], 3)
+                     if i > 0 else None)
+            cands.append({**r, "delta_to_next": delta, "tie_with_leader": tie})
+        out_regions.append({
+            "bbox": list(reg["bbox"]), "text": reg["text"],
+            "classification": reg["classification"],
+            "candidates": cands, "skipped": reg.get("skipped", 0),
+        })
+    return {"draft": True,
+            "note": ("Emisión draft — el esquema puede cambiar cuando Fase B "
+                     "firme sus requisitos de información (ver spec)."),
+            "corpus": "Google Fonts",
+            "regions": out_regions}
+
+
+def write_preview(crop_bgr, text, top_rows, out_path, cache_dir, ink=(135, 177, 164)):
+    """Tira comparativa: crop original | top-N renders al peso elegido.
+
+    Busca cada TTF como {cache_dir}/{Familia_con_guiones}_{wght}.ttf —
+    el nombre exacto que escribe download_family_weights.
+    """
+    h = crop_bgr.shape[0]
+    panels = [crop_bgr]
+    for r in top_rows:
+        ttf = Path(cache_dir) / f"{r['family'].replace(' ', '_')}_{r['wght']}.ttf"
+        if not ttf.exists():
+            continue
+        font = ImageFont.truetype(str(ttf), max(24, int(h * 0.7)))
+        bbox = font.getbbox(text)
+        img = Image.new("RGB", (bbox[2] - bbox[0] + 24, bbox[3] - bbox[1] + 24),
+                        (255, 255, 255))
+        ImageDraw.Draw(img).text((12 - bbox[0], 12 - bbox[1]), text,
+                                 fill=ink[::-1], font=font)
+        panel = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        panel = cv2.resize(panel, (max(1, int(panel.shape[1] * h / panel.shape[0])), h))
+        panels.append(np.full((h, 16, 3), 255, np.uint8))
+        panels.append(panel)
+    cv2.imwrite(str(out_path), cv2.hconcat(panels))
+    return out_path
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -478,22 +573,50 @@ def print_region_report(idx, text, ranked, controls, skipped, mismatch):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        description="Spike A.0 — aproximación de fuentes (Google Fonts). "
+        description="Fase A — aproximación de fuentes (Google Fonts). "
                     "NO identifica: aproxima.")
     p.add_argument("input", help="Imagen del logo")
-    p.add_argument("--region", action="append", required=True,
-                   help="x0,y0,x1,y1 (repetible, pareado con --text)")
-    p.add_argument("--text", action="append", required=True,
+    p.add_argument("--region", action="append",
+                   help="x0,y0,x1,y1 (repetible, pareado con --text; "
+                        "sin esto, OCR automático — Windows-only)")
+    p.add_argument("--text", action="append",
                    help="Texto de la región (repetible, pareado con --region)")
-    p.add_argument("--cache-dir", default="ttf_cache",
-                   help="Caché de TTFs (default: ./ttf_cache)")
+    p.add_argument("--pool", type=int, default=60,
+                   help="Tamaño del pool de candidatas (default 60)")
+    p.add_argument("--category", default=None,
+                   help="Limita el pool a una categoría GF (serif, sans-serif, display)")
+    p.add_argument("--api", action="store_true",
+                   help="Nominación vía API de Claude (OPT-IN: envía los crops "
+                        "a Anthropic; la sola presencia de la key no activa nada)")
+    p.add_argument("--json", action="store_true", help="Salida JSON (emisión draft)")
+    p.add_argument("--preview", action="store_true",
+                   help="Tira PNG comparativa por región (junto al input)")
+    p.add_argument("--cache-dir", default=CACHE_DIR_DEFAULT,
+                   help="Caché de TTFs y metadata")
     return p
 
 
 def validate_args(args):
-    if len(args.region) != len(args.text):
+    if (args.region is None) != (args.text is None):
+        sys.exit("error: --region y --text van juntos")
+    if args.region and len(args.region) != len(args.text):
         sys.exit(f"error: --region ({len(args.region)}) y --text "
                  f"({len(args.text)}) deben ir pareados posicionalmente")
+
+
+def _manual_regions(img, args):
+    regions = []
+    for reg, text in zip(args.region, args.text):
+        try:
+            x0, y0, x1, y1 = (int(v) for v in reg.split(","))
+        except ValueError:
+            sys.exit(f"error: región inválida {reg!r} (formato x0,y0,x1,y1)")
+        crop = img[y0:y1, x0:x1]
+        if crop.size == 0:
+            sys.exit(f"error: región {reg!r} fuera de los límites de la imagen "
+                     f"{img.shape[1]}x{img.shape[0]}")
+        regions.append({"bbox": (x0, y0, x1, y1), "text": text})
+    return regions
 
 
 def main():
@@ -503,18 +626,73 @@ def main():
     img = load_image_bgr(args.input)
     if img is None:
         raise ValueError(f"No se pudo cargar: {args.input}")
-    print(CORPUS_NOTE)
-    for i, (reg, text) in enumerate(zip(args.region, args.text), 1):
+
+    if args.region:
+        raw_regions = _manual_regions(img, args)
+        forced = True
+    else:
         try:
-            x0, y0, x1, y1 = (int(v) for v in reg.split(","))
-        except ValueError:
-            sys.exit(f"error: región inválida {reg!r} (formato x0,y0,x1,y1)")
-        crop = img[y0:y1, x0:x1]
-        if crop.size == 0:
-            sys.exit(f"error: región {reg!r} fuera de los límites de la imagen "
-                     f"{img.shape[1]}x{img.shape[0]}")
-        ranked, controls, skipped, mismatch = rank_region(crop, text, args.cache_dir)
-        print_region_report(i, text, ranked, controls, skipped, mismatch)
+            raw_regions = detect_regions(img)
+        except RuntimeError as e:
+            sys.exit(f"error: {e}")
+        forced = False
+        if not raw_regions:
+            sys.exit("sin regiones de texto detectadas — usa --region/--text")
+
+    metadata = fetch_metadata(args.cache_dir)
+    pool = build_pool(metadata, pool_size=args.pool, category=args.category)
+
+    api_set = set()
+    if args.api:
+        crops_png = []
+        for reg in raw_regions:
+            x0, y0, x1, y1 = reg["bbox"]
+            ok, buf = cv2.imencode(".png", img[y0:y1, x0:x1])
+            if ok:
+                crops_png.append(buf.tobytes())
+        nominated = nominate_via_api(crops_png, [r["text"] for r in raw_regions])
+        pool, api_set = merge_nominations(pool, nominated)
+
+    family_weights = prepare_pool_weights(pool, args.cache_dir)
+    skipped_total = sum(1 for w in family_weights.values() if not w)
+
+    print(CORPUS_NOTE)
+    results = []
+    for i, reg in enumerate(raw_regions, 1):
+        x0, y0, x1, y1 = reg["bbox"]
+        glyphs = segment_glyphs_fused(img[y0:y1, x0:x1])
+        chars = [c for c in reg["text"] if not c.isspace()]
+        cls = (classify_region(glyphs, reg["text"]) if not forced
+               else {"label": "type", "score": 1.0, "baseline_residual": 0.0,
+                     "height_var": 0.0, "repeats_used": False,
+                     "note": "región forzada por el usuario"})
+        entry = {"bbox": reg["bbox"], "text": reg["text"],
+                 "classification": cls, "rows": [], "skipped": skipped_total}
+        if cls["label"] != "handwriting":
+            if len(glyphs) != len(chars):
+                print(f"\n[REGIÓN {i}] \"{reg['text']}\" — segmentación≠texto "
+                      f"({len(glyphs)} glifos vs {len(chars)} chars) — no se rankea.")
+                results.append(entry)
+                continue
+            entry["rows"] = rank_families(glyphs, chars, family_weights, api_set)
+            cat_by_family = {m["family"]: m.get("category") for m in metadata}
+            for r in entry["rows"]:
+                r["category"] = cat_by_family.get(r["family"])
+        print_region_report(i, entry)
+        if args.preview and entry["rows"]:
+            out = Path(args.input).with_name(
+                Path(args.input).stem + f"_fontid_r{i}.png")
+            write_preview(img[y0:y1, x0:x1], reg["text"], entry["rows"][:3],
+                          out, args.cache_dir)
+            print(f"  preview: {out}")
+        results.append(entry)
+
+    if not forced:
+        print("\nAviso: zonas con texto caligráfico pueden no listarse arriba "
+              "(el OCR no siempre emite región para handwriting). Usa "
+              "--region/--text para forzarlas.")
+    if args.json:
+        print(json.dumps(build_json_draft(results), ensure_ascii=False, indent=2))
 
 
 # ═══════════════════════════════════════════════════════════════════
