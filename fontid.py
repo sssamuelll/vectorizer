@@ -307,15 +307,24 @@ def build_pool(metadata, pool_size=60, category=None):
 # 3c. PROBING DE PESOS (Fase A — prioridad #1 del gate A.0)
 # ═══════════════════════════════════════════════════════════════════
 
-WGHT_RANGE = "300..700"
+# Sintaxis DISCRETA: GF silencia pesos no disponibles en vez de devolver HTTP 400.
+# La sintaxis de rango "300..700" falla con 400 en familias de eje estrecho
+# (Lora, EB Garamond solo tienen peso 400) — hallazgo del review 2026-06-05,
+# verificado en vivo. Con la lista discreta GF omite lo que no tiene, sin error.
+WGHT_RANGE = "300;400;500;600;700"
 
 
 def parse_weight_css(css):
     """CSS2 → [(wght, url_ttf)] por bloque @font-face (hecho runtime nuevo:
-    GF entrega estáticos por peso con descriptores font-weight)."""
+    GF entrega estáticos por peso con descriptores font-weight).
+
+    El patrón requiere el ';' al final del valor para rechazar bloques de
+    fuente variable ('font-weight: 300 700;') que de otro modo capturarían
+    el primer número de forma incorrecta.
+    """
     pairs = []
     for block in css.split("@font-face")[1:]:
-        mw = re.search(r"font-weight:\s*(\d+)", block)
+        mw = re.search(r"font-weight:\s*(\d+)\s*;", block)
         mu = re.search(r"url\((https://[^)]+\.ttf)\)", block)
         if mw and mu:
             pairs.append((int(mw.group(1)), mu.group(1)))

@@ -114,7 +114,6 @@ def test_common_scale_penalizes_proportion_mismatch():
 
 def test_cli_region_text_pairing():
     """Conteos N≠M de --region/--text → SystemExit con error claro."""
-    import pytest
     parser = fi.build_parser()
     args = parser.parse_args(["x.png", "--region", "0,0,10,10",
                               "--region", "0,0,20,20", "--text", "ab"])
@@ -226,6 +225,20 @@ def test_parse_weight_css():
                      (700, "https://fonts.gstatic.com/s/demo/v1/bold.ttf")]
 
 
+def test_parse_weight_css_skips_range_blocks():
+    """Bloques de fuente variable 'font-weight: 300 700;' se saltan, no se malparsean."""
+    css = FAKE_CSS + '''
+@font-face {
+  font-family: 'Var';
+  font-weight: 300 700;
+  src: url(https://fonts.gstatic.com/s/var/v1/var.ttf) format('truetype');
+}
+'''
+    pairs = fi.parse_weight_css(css)
+    assert (300, "https://fonts.gstatic.com/s/var/v1/var.ttf") not in pairs
+    assert len(pairs) == 2     # solo los dos bloques estáticos del FAKE_CSS
+
+
 def test_match_family_returns_score_weight_and_scale(tmp_path):
     """match_family con un solo TTF local (sin red): devuelve (score, wght, s)."""
     import shutil
@@ -244,7 +257,10 @@ def test_match_family_returns_score_weight_and_scale(tmp_path):
 
 @pytest.mark.network
 def test_weight_probing_real_garalda(tmp_path):
-    """Cormorant Garamond real: descarga ≥3 pesos; archivos validados."""
-    weights = fi.download_family_weights("Cormorant Garamond", tmp_path)
-    assert len(weights) >= 3
-    assert all(p.exists() for _, p in weights)
+    """Familias de eje completo Y de eje estrecho: ambas deben dar pesos.
+    (El bug del rango 300..700 devolvía [] para Lora/EB Garamond.)"""
+    for fam, min_expected in [("Cormorant Garamond", 3), ("Lora", 2),
+                              ("EB Garamond", 2)]:
+        weights = fi.download_family_weights(fam, tmp_path)
+        assert len(weights) >= min_expected, f"{fam}: {weights}"
+        assert all(p.exists() for _, p in weights)
