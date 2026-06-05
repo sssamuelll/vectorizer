@@ -440,3 +440,16 @@ def test_cli_manual_mode_still_works():
     args = fi.build_parser().parse_args(
         ["x.png", "--region", "0,0,9,9", "--text", "ab"])
     fi.validate_args(args)   # no SystemExit
+
+
+def test_main_guard_is_last_statement():
+    """El guard __main__ debe ser el ÚLTIMO statement del módulo — si queda
+    arriba de funciones, el flujo auto muere con NameError al correr como
+    script (bug del review de Task 7, invisible para tests que importan)."""
+    import ast
+    src = (Path(fi.__file__)).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    last = tree.body[-1]
+    assert isinstance(last, ast.If), "el último statement no es el guard __main__"
+    cond = ast.unparse(last.test)
+    assert "__main__" in cond

@@ -656,13 +656,14 @@ def main():
     family_weights = prepare_pool_weights(pool, args.cache_dir)
     skipped_total = sum(1 for w in family_weights.values() if not w)
 
-    print(CORPUS_NOTE)
+    if not args.json:
+        print(CORPUS_NOTE)
     results = []
     for i, reg in enumerate(raw_regions, 1):
         x0, y0, x1, y1 = reg["bbox"]
-        glyphs = segment_glyphs_fused(img[y0:y1, x0:x1])
+        glyphs, gboxes = segment_glyphs_with_boxes(img[y0:y1, x0:x1])
         chars = [c for c in reg["text"] if not c.isspace()]
-        cls = (classify_region(glyphs, reg["text"]) if not forced
+        cls = (classify_region(glyphs, reg["text"], boxes=gboxes) if not forced
                else {"label": "type", "score": 1.0, "baseline_residual": 0.0,
                      "height_var": 0.0, "repeats_used": False,
                      "note": "región forzada por el usuario"})
@@ -670,24 +671,27 @@ def main():
                  "classification": cls, "rows": [], "skipped": skipped_total}
         if cls["label"] != "handwriting":
             if len(glyphs) != len(chars):
-                print(f"\n[REGIÓN {i}] \"{reg['text']}\" — segmentación≠texto "
-                      f"({len(glyphs)} glifos vs {len(chars)} chars) — no se rankea.")
+                if not args.json:
+                    print(f"\n[REGIÓN {i}] \"{reg['text']}\" — segmentación≠texto "
+                          f"({len(glyphs)} glifos vs {len(chars)} chars) — no se rankea.")
                 results.append(entry)
                 continue
             entry["rows"] = rank_families(glyphs, chars, family_weights, api_set)
             cat_by_family = {m["family"]: m.get("category") for m in metadata}
             for r in entry["rows"]:
                 r["category"] = cat_by_family.get(r["family"])
-        print_region_report(i, entry)
+        if not args.json:
+            print_region_report(i, entry)
         if args.preview and entry["rows"]:
             out = Path(args.input).with_name(
                 Path(args.input).stem + f"_fontid_r{i}.png")
             write_preview(img[y0:y1, x0:x1], reg["text"], entry["rows"][:3],
                           out, args.cache_dir)
-            print(f"  preview: {out}")
+            if not args.json:
+                print(f"  preview: {out}")
         results.append(entry)
 
-    if not forced:
+    if not forced and not args.json:
         print("\nAviso: zonas con texto caligráfico pueden no listarse arriba "
               "(el OCR no siempre emite región para handwriting). Usa "
               "--region/--text para forzarlas.")
@@ -760,10 +764,6 @@ def merge_nominations(pool, nominated):
     api_only = {f for f in nominated if f not in pool}
     merged = list(dict.fromkeys(list(nominated) + list(pool)))
     return merged, api_only
-
-
-if __name__ == "__main__":
-    main()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -956,3 +956,7 @@ def classify_region(glyph_masks, text, boxes=None):
         "repeats_used": repeats_used,
     })
     return base
+
+
+if __name__ == "__main__":
+    main()
