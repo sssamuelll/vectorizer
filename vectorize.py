@@ -362,6 +362,42 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 6.5. WRAPPER VTRACER (posicional-only)
+# ═══════════════════════════════════════════════════════════════════
+
+SVG_NS = "http://www.w3.org/2000/svg"
+
+
+def _vtracer_convert(png_bytes,
+                     colormode="color", hierarchical="stacked", mode="spline",
+                     filter_speckle=4, color_precision=6, layer_difference=16,
+                     corner_threshold=60, length_threshold=4.0,
+                     max_iterations=10, splice_threshold=45, path_precision=3):
+    """Única puerta hacia vtracer. Invoca SIEMPRE en forma 100% posicional.
+
+    NUNCA pasar kwargs a vtracer: el binding PyO3 del wheel cp314 produce
+    SIGSEGV (ACCESS_VIOLATION 0xC0000005) con cualquier keyword argument
+    en Python 3.14 — mata el proceso sin excepción capturable.
+    Verificado 2026-06-05 (spec, hechos runtime 2-4). Orden posicional:
+    (img_bytes, img_format, colormode, hierarchical, mode, filter_speckle,
+     color_precision, layer_difference, corner_threshold, length_threshold,
+     max_iterations, splice_threshold, path_precision)
+    """
+    try:
+        import vtracer
+    except ImportError:
+        raise RuntimeError(
+            "El modo color requiere vtracer. Instala con: pip install vtracer"
+        ) from None
+    return vtracer.convert_raw_image_to_svg(
+        png_bytes, "png", colormode, hierarchical, mode,
+        filter_speckle, color_precision, layer_difference,
+        corner_threshold, length_threshold, max_iterations,
+        splice_threshold, path_precision,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 7. PIPELINE
 # ═══════════════════════════════════════════════════════════════════
 

@@ -52,3 +52,19 @@ def test_load_matches_imread_for_opaque_png(tmp_path):
 
 def test_load_returns_none_for_missing_file(tmp_path):
     assert vz.load_image_bgr(tmp_path / "nope.png") is None
+
+
+# ═══════════════════════════════════════════════════════════════════
+# WRAPPER VTRACER (spec: hechos runtime 2-4 — posicional-only)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_vtracer_wrapper_returns_svg(tmp_path):
+    """El wrapper convierte PNG bytes → SVG string, con params custom."""
+    p = make_logo(tmp_path / "logo.png")
+    ok, buf = cv2.imencode(".png", cv2.imread(str(p)))
+    assert ok
+    svg = vz._vtracer_convert(buf.tobytes(), filter_speckle=8,
+                              color_precision=6, layer_difference=48,
+                              corner_threshold=45)
+    assert "<svg" in svg
+    assert "</svg>" in svg
