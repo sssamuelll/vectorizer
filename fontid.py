@@ -610,9 +610,10 @@ _HEIGHT_VAR_NORM = 0.35         # variación relativa de altura idem
 def classify_region(glyph_masks, text):
     """Score escalar tipografía↔handwriting con estadísticas crudas.
 
-    Señales: (1) residuo de baseline (fit lineal de los bottoms de los
-    glifos), (2) variación relativa de altura, (3) repetición de formas
-    SOLO si el texto tiene letras repetidas (declarado en el resultado).
+    Señales: (1) residuo robusto de baseline (P90 de bottoms + MAD del fit
+    lineal — robusto a serifas y descendentes), (2) variación relativa de
+    altura, (3) repetición de formas SOLO si el texto tiene letras repetidas
+    (declarado en el resultado).
     """
     if len(glyph_masks) < 2:
         return {"label": "uncertain", "score": 0.5, "baseline_residual": 0.0,
@@ -623,13 +624,17 @@ def classify_region(glyph_masks, text):
     x_cursor = 0
     for m in glyph_masks:
         ys, _ = np.where(m)
-        bottoms.append(float(ys.max()))
+        # P90, no max: las serifas profundas (p.ej. la 'n' de Georgia) no son el baseline
+        bottoms.append(float(np.percentile(ys, 90)))
         heights.append(float(m.shape[0]))
         xs.append(float(x_cursor)); x_cursor += m.shape[1]
     bottoms, heights, xs = map(np.array, (bottoms, heights, xs))
 
     coef = np.polyfit(xs, bottoms, 1)
-    residual = float(np.std(bottoms - np.polyval(coef, xs)))
+    dev = bottoms - np.polyval(coef, xs)
+    # MAD escalada (~std bajo normalidad), robusta a los pocos
+    # descendentes legítimos (g/p/y) de un texto tipográfico real
+    residual = float(1.4826 * np.median(np.abs(dev - np.median(dev))))
     height_var = float(np.std(heights) / max(np.mean(heights), 1e-6))
 
     s_base = max(0.0, 1.0 - residual / _RESIDUAL_NORM_PX)
