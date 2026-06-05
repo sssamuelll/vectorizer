@@ -68,3 +68,29 @@ def test_vtracer_wrapper_returns_svg(tmp_path):
                               corner_threshold=45)
     assert "<svg" in svg
     assert "</svg>" in svg
+
+
+# ═══════════════════════════════════════════════════════════════════
+# COLORES EFECTIVOS + PRESET (spec: determinismo obligatorio)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_effective_colors_deterministic(tmp_path):
+    """Misma imagen → mismo conteo en corridas repetidas."""
+    img = cv2.imread(str(make_logo(tmp_path / "logo.png")))
+    runs = [vz.count_effective_colors(img) for _ in range(3)]
+    assert runs[0] == runs[1] == runs[2]
+
+
+def test_preset_choice_logo_vs_photo(tmp_path):
+    """≤12 colores efectivos → logo; ruido full-color → photo."""
+    logo = cv2.imread(str(make_logo(tmp_path / "logo.png")))
+    assert vz.choose_preset(logo) == "logo"
+    rng = np.random.default_rng(7)
+    noise = rng.integers(0, 256, (256, 256, 3), dtype=np.uint8)
+    assert vz.choose_preset(noise) == "photo"
+
+
+def test_preset_choice_deterministic(tmp_path):
+    """Misma imagen → mismo preset siempre (test del grupo 'Preset determinista')."""
+    img = cv2.imread(str(make_logo(tmp_path / "logo.png")))
+    assert len({vz.choose_preset(img) for _ in range(3)}) == 1

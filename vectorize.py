@@ -397,6 +397,48 @@ def _vtracer_convert(png_bytes,
     )
 
 
+def count_effective_colors(img_bgr, k=16, coverage=0.95, max_side=256,
+                           sample_px=10000, seed=42):
+    """Cuenta colores efectivos: nº de clusters k-means (LAB) que cubren
+    `coverage` de los píxeles, ordenados por población.
+
+    Determinismo obligatorio (spec): semilla fija, KMEANS_PP_CENTERS y
+    attempts=3 — con RANDOM_CENTERS el conteo varía entre corridas.
+    k=16 para resolver el umbral de preset (12).
+    """
+    h, w = img_bgr.shape[:2]
+    if max(h, w) > max_side:
+        s = max_side / max(h, w)
+        img_bgr = cv2.resize(img_bgr, (max(1, int(w * s)), max(1, int(h * s))),
+                             interpolation=cv2.INTER_AREA)
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    pixels = lab.reshape(-1, 3).astype(np.float32)
+    if len(pixels) > sample_px:
+        rng = np.random.default_rng(seed)
+        pixels = pixels[rng.choice(len(pixels), sample_px, replace=False)]
+    k = min(k, len(pixels))
+    cv2.setRNGSeed(seed)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+    _, labels, _ = cv2.kmeans(pixels, k, None, criteria, 3,
+                              cv2.KMEANS_PP_CENTERS)
+    counts = np.sort(np.bincount(labels.flatten(), minlength=k))[::-1]
+    cum = np.cumsum(counts) / counts.sum()
+    return int(np.searchsorted(cum, coverage) + 1)
+
+
+def choose_preset(img_bgr):
+    """≤12 colores efectivos → logo; >12 → photo.
+
+    `drawing` solo se activa manualmente (--preset drawing) — decisión
+    intencional del spec: el conteo de color no separa de forma fiable
+    una ilustración con gradientes de un logo o una foto.
+    """
+    n = count_effective_colors(img_bgr)
+    preset = "logo" if n <= 12 else "photo"
+    print(f"  [PRESET] {preset} ({n} colores efectivos)")
+    return preset
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 7. PIPELINE
 # ═══════════════════════════════════════════════════════════════════
