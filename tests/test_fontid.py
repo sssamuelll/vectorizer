@@ -148,3 +148,54 @@ def test_vertical_fusion_preserves_mente():
     """Sin puntos, la fusión no altera nada: 'mente' sigue siendo 5."""
     crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
     assert len(fi.segment_glyphs_fused(crop)) == 5
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — METADATA Y POOL (spec: hecho runtime 4, Title Case)
+# ═══════════════════════════════════════════════════════════════════
+
+import json
+import pytest
+
+
+def _fake_metadata(tmp_path):
+    """Escribe un metadata.json mínimo y fresco en el cache dir."""
+    meta = {"familyMetadataList": [
+        {"family": "Roboto", "category": "Sans Serif", "popularity": 1},
+        {"family": "Lora", "category": "Serif", "popularity": 2},
+        {"family": "Oswald", "category": "Sans Serif", "popularity": 3},
+        {"family": "Cormorant Garamond", "category": "Serif", "popularity": 4},
+        {"family": "Pacifico", "category": "Handwriting", "popularity": 5},
+        {"family": "Cinzel", "category": "Display", "popularity": 6},
+    ]}
+    (tmp_path / "metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+    return tmp_path
+
+
+def test_pool_from_metadata_respects_categories(tmp_path):
+    """Pool default: Serif + Sans Serif + Display por popularidad. Handwriting fuera."""
+    cache = _fake_metadata(tmp_path)
+    pool = fi.build_pool(fi.fetch_metadata(cache), pool_size=60)
+    assert pool == ["Roboto", "Lora", "Oswald", "Cormorant Garamond", "Cinzel"]
+    assert "Pacifico" not in pool
+
+
+def test_pool_category_filter_normalizes_title_case(tmp_path):
+    """--category 'sans-serif' (input del usuario) matchea 'Sans Serif' (Title Case real)."""
+    cache = _fake_metadata(tmp_path)
+    pool = fi.build_pool(fi.fetch_metadata(cache), pool_size=60, category="sans-serif")
+    assert pool == ["Roboto", "Oswald"]
+
+
+def test_pool_size_caps(tmp_path):
+    cache = _fake_metadata(tmp_path)
+    assert len(fi.build_pool(fi.fetch_metadata(cache), pool_size=2)) == 2
+
+
+@pytest.mark.network
+def test_metadata_real_download(tmp_path):
+    """Descarga real: >1500 familias, categorías Title Case presentes."""
+    meta = fi.fetch_metadata(tmp_path)
+    assert len(meta) > 1500
+    cats = {m.get("category") for m in meta}
+    assert {"Serif", "Sans Serif", "Display"} <= cats

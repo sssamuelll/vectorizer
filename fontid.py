@@ -10,9 +10,11 @@ Uso:
 """
 
 import argparse
+import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -237,6 +239,63 @@ def download_ttf(family, cache_dir):
         return None
     os.replace(tmp, dest)  # escritura atómica (spec)
     return dest
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3b. METADATA DE GOOGLE FONTS Y POOL (Fase A)
+# ═══════════════════════════════════════════════════════════════════
+
+CACHE_DIR_DEFAULT = str(Path.home() / ".cache" / "vectorizer-fonts")
+GF_METADATA_URL = "https://fonts.google.com/metadata/fonts"
+METADATA_TTL_S = 7 * 24 * 3600          # TTL semanal (spec, Caché)
+# Categorías Title Case REALES del metadata (hecho runtime 4). El input
+# del usuario se normaliza antes de comparar.
+POOL_CATEGORIES = ("Serif", "Sans Serif", "Display")
+
+
+def _normalize_category(cat):
+    """'sans-serif' / 'SERIF' / 'sans serif' → forma Title Case real."""
+    return cat.replace("-", " ").strip().title()
+
+
+def fetch_metadata(cache_dir):
+    """Metadata de GF con caché TTL semanal. Devuelve familyMetadataList.
+
+    Sin red y sin caché → RuntimeError con mensaje claro. Sin red CON
+    caché vencida → usa la caché vencida con warning (mejor que nada).
+    """
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / "metadata.json"
+    fresh = dest.exists() and (time.time() - dest.stat().st_mtime) < METADATA_TTL_S
+    if not fresh:
+        try:
+            raw = urllib.request.urlopen(GF_METADATA_URL, timeout=30).read()
+            tmp = dest.with_suffix(".json.tmp")
+            tmp.write_bytes(raw)
+            json.loads(raw.decode("utf-8"))     # valida antes de promover
+            os.replace(tmp, dest)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            if not dest.exists():
+                raise RuntimeError(
+                    "No se pudo descargar la metadata de Google Fonts y no hay "
+                    "caché previa. Revisa la red o usa --region/--text con "
+                    "--pool-file manual.") from None
+            print("  [WARN] metadata GF: sin red; usando caché vencida.")
+    return json.loads(dest.read_text(encoding="utf-8"))["familyMetadataList"]
+
+
+def build_pool(metadata, pool_size=60, category=None):
+    """Pool por popularidad. Default: Serif + Sans Serif + Display.
+
+    `category` (input de usuario, cualquier casing) se normaliza a la
+    forma Title Case real del metadata.
+    """
+    cats = (POOL_CATEGORIES if category is None
+            else (_normalize_category(category),))
+    fams = [m for m in metadata if m.get("category") in cats]
+    fams.sort(key=lambda m: m.get("popularity", 10 ** 9))
+    return [m["family"] for m in fams[:pool_size]]
 
 
 # ═══════════════════════════════════════════════════════════════════
