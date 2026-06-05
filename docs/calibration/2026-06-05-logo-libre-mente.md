@@ -124,3 +124,56 @@ probing de pesos como prioridad informada por esta evidencia.
 - Sin candidatas omitidas: los 24 TTFs del pool se descargaron y validaron sin errores de red.
 - Tira visual "mente": crop 600×170 px | render Libre Baskerville 120pt escalado a 620×170 px.
 - Tira visual "INTEGRATIVE PSYCHOLOGY": crop 960×100 px | render Source Serif 4 60pt escalado a 1054×100 px.
+
+## Fase A — corrida de aceptación (2026-06-06)
+
+```
+Corpus: Google Fonts. Si la fuente original es comercial, esto es la
+alternativa libre más cercana — no una identificación.
+
+[REGIÓN 1] "mente" — type (score 0.947, baseline res=0.23px, var. altura=0.008, repetición usada)
+  cluster: Serif — separación vs mejor de otra categoría: 0.176 (MARGINAL)
+  1. Libre Baskerville        overlap 0.747 (wght 400)
+  2. Noto Serif JP            overlap 0.733 (wght 500)   Δ 0.014  → EMPATE con el líder
+  3. Lora                     overlap 0.663 (wght 400)   Δ 0.070
+  4. Merriweather             overlap 0.659 (wght 600)   Δ 0.004
+  5. PT Serif                 overlap 0.657 (wght 400)   Δ 0.002
+  preview: C:\Users\simon\Desktop\logo_ale_fontid_r1.png
+
+[REGIÓN 2] "INTEGRATIVE PSYCHOLOGY" — type (score 0.87, baseline res=0.4px, var. altura=0.028, repetición usada)
+  cluster: Serif — separación vs mejor de otra categoría: 0.103 (MARGINAL)
+  1. Lora                     overlap 0.726 (wght 600)
+  2. PT Serif                 overlap 0.715 (wght 700)   Δ 0.011  → EMPATE con el líder
+  3. Noto Serif               overlap 0.711 (wght 500)   Δ 0.004  → EMPATE con el líder
+  4. Merriweather             overlap 0.709 (wght 600)   Δ 0.002  → EMPATE con el líder
+  5. Libre Baskerville        overlap 0.706 (wght 700)   Δ 0.003  → EMPATE con el líder
+  preview: C:\Users\simon\Desktop\logo_ale_fontid_r2.png
+
+Aviso: zonas con texto caligráfico pueden no listarse arriba (el OCR no siempre emite región para handwriting). Usa --region/--text para forzarlas.
+```
+
+**Tiempos:** fría 42.8s / caliente 5.2s.
+
+**OCR:** Detectó correctamente 2 regiones: "mente" y "INTEGRATIVE PSYCHOLOGY". La caligrafia "libre" no apareció como región separada — confirmado el límite declarado del spike (el OCR Windows no siempre emite región para handwriting). Ambas regiones tipográficas detectadas sin intervención manual.
+
+**Pregunta 1 (pesos):** El probing de pesos NO cambió el líder de "mente": sigue siendo Libre Baskerville con overlap 0.747, pero ahora identificado como wght 400 (regular). Cormorant Garamond desapareció del top-5 — fue desplazado por Noto Serif JP (0.733, wght 500) y Lora (0.663, wght 400). Resultado comparado contra el spike:
+
+| familia | spike (sin pesos) | aceptación (con pesos) | Δ |
+|---|---|---|---|
+| Libre Baskerville | 0.747 (implícito wght 400) | 0.747 (wght 400) | 0.000 |
+| Cormorant Garamond | 0.737 (implícito wght 400) | **no aparece en top-5** | — |
+| EB Garamond | 0.683 (implícito wght 400) | **no aparece en top-5** | — |
+| Crimson Text | 0.668 | **no aparece en top-5** | — |
+| Lora | 0.663 | 0.663 (wght 400) | 0.000 |
+
+La hipótesis del gate (que el probing promovería Cormorant Garamond Light en "mente") **no se cumplió**. El pool del flujo automático es de 60 familias por popularidad GF vs. el SPIKE_POOL de 24 familias curadas — las garaldas (Cormorant Garamond, EB Garamond) pueden no haber entrado en el top-60 por popularidad o haber sido desplazadas por otros serifs más populares. El líder Libre Baskerville se mantiene estable en 0.747 con su peso regular.
+
+Para Región 2, el líder cambió: Lora 0.726 wght 600 en vez de Source Serif 4 0.712 del spike. El probing de pesos sí impactó aquí — Lora a peso 600 supera a todos los candidatos del spike.
+
+**Pregunta 2 (auto):** El flujo automático (OCR + classify_region) funcionó correctamente. Región 1 ("mente"): clasificada como `type` score 0.947 (alta confianza — baseline residual 0.23px muy bajo, altura casi uniforme, repetición de 'e' confirmada). Región 2 ("INTEGRATIVE PSYCHOLOGY"): clasificada como `type` score 0.87. La caligrafia de "libre" no fue detectada por OCR (comportamiento esperado y documentado).
+
+**Previews:**
+- `C:\Users\simon\Desktop\logo_ale_fontid_r1.png`
+- `C:\Users\simon\Desktop\logo_ale_fontid_r2.png`
+
+**Pendiente:** juicio de aceptación de Samuel.
