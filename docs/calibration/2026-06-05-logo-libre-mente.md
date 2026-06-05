@@ -177,3 +177,30 @@ Para Región 2, el líder cambió: Lora 0.726 wght 600 en vez de Source Serif 4 
 - `C:\Users\simon\Desktop\logo_ale_fontid_r2.png`
 
 **Pendiente:** juicio de aceptación de Samuel.
+
+### Corrida complementaria: `--category serif --pool 60` (2026-06-06)
+
+El hallazgo de la corrida full-auto (el pool por popularidad general expulsa a las
+garaldas) se confirmó y se resolvió con el pool por categoría:
+
+```
+[REGIÓN 1] "mente"
+  1. Cormorant Garamond       overlap 0.753 (wght 500)   ← NUEVO LÍDER
+  2. Libre Baskerville        overlap 0.747 (wght 400)   Δ 0.006  → EMPATE
+  3-5. Noto Serif JP/KR/TC    overlap 0.733 (wght 500)   → EMPATE
+
+[REGIÓN 2] "INTEGRATIVE PSYCHOLOGY"
+  1. STIX Two Text            overlap 0.770 (wght 600)
+  2. Crimson Pro              overlap 0.758 (wght 500)   → EMPATE
+  3. Crimson Text             overlap 0.754 (wght 600)   → EMPATE
+```
+
+**La hipótesis del gate se confirma con el pool correcto:** el probing de pesos
+promovió a Cormorant Garamond de 0.737 (wght 400, spike) a **0.753 (wght 500)**,
+desplazando a Libre Baskerville del liderato. Visualmente (preview r1) Cormorant 500
+es la más cercana al contraste fino del original.
+
+**Hallazgo de producto:** el pool default por popularidad general (Serif+Sans+Display)
+no contiene a las garaldas — para logos serif, `--category serif` es prácticamente
+obligatorio. Candidato Fase A.x: elegir la categoría del pool automáticamente desde
+las features del crop, o documentar `--category` como flag recomendado.
