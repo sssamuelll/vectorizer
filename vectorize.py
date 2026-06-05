@@ -19,6 +19,32 @@ import xml.etree.ElementTree as ET
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 0. CARGA DE IMAGEN (política de alpha compartida)
+# ═══════════════════════════════════════════════════════════════════
+
+def load_image_bgr(image_path):
+    """Carga una imagen como BGR uint8, componiendo alpha sobre blanco.
+
+    cv2.imread por defecto descarta el canal alpha: un PNG transparente
+    entra con fondo negro basura. Aquí: IMREAD_UNCHANGED + composición
+    sobre blanco. Una sola política para todos los pipelines.
+    Devuelve None si la imagen no se puede cargar (igual que cv2.imread).
+    """
+    img = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+    if img.dtype == np.uint16:                    # PNG de 16 bits → 8 bits
+        img = (img // 257).astype(np.uint8)
+    if img.ndim == 2:                             # escala de grises → BGR
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.shape[2] == 4:                         # BGRA → componer sobre blanco
+        alpha = img[:, :, 3:4].astype(np.float64) / 255.0
+        bgr = img[:, :, :3].astype(np.float64)
+        return (bgr * alpha + 255.0 * (1.0 - alpha)).astype(np.uint8)
+    return img
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 1. COLOR REAL DEL TRAZO
 # ═══════════════════════════════════════════════════════════════════
 
@@ -369,7 +395,7 @@ def vectorize(image_path, output_path=None,
     if mode not in ("contour", "skeleton", "both"):
         raise ValueError(f"mode must be contour|skeleton|both, got {mode!r}")
 
-    img = cv2.imread(str(image_path))
+    img = load_image_bgr(image_path)
     if img is None:
         raise ValueError(f"No se pudo cargar: {image_path}")
 
