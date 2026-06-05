@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
 
 import cv2
@@ -591,3 +592,72 @@ def detect_regions(img_bgr):
         regions.append({"bbox": (x0, y0, x1, y1), "text": text,
                         "word_boxes": boxes})
     return regions
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3e. CLASIFICACIÓN ESCALAR (Fase A — reframe del spec: un score con
+#     dos cortes; 'uncertain' es estado del clasificador, no del mundo)
+# ═══════════════════════════════════════════════════════════════════
+
+# Constantes PROVISIONALES (sin corpus de calibración aún — el spec lo
+# declara). Las stats crudas se reportan siempre; los cortes solo etiquetan.
+CLASSIFY_TYPE_CUT = 0.65        # score ≥ → "type"
+CLASSIFY_HAND_CUT = 0.45        # score ≤ → "handwriting"; entre ambos → "uncertain"
+_RESIDUAL_NORM_PX = 4.0         # residuo de baseline que ya cuenta como irregular
+_HEIGHT_VAR_NORM = 0.35         # variación relativa de altura idem
+
+
+def classify_region(glyph_masks, text):
+    """Score escalar tipografía↔handwriting con estadísticas crudas.
+
+    Señales: (1) residuo de baseline (fit lineal de los bottoms de los
+    glifos), (2) variación relativa de altura, (3) repetición de formas
+    SOLO si el texto tiene letras repetidas (declarado en el resultado).
+    """
+    if len(glyph_masks) < 2:
+        return {"label": "uncertain", "score": 0.5, "baseline_residual": 0.0,
+                "height_var": 0.0, "repeats_used": False,
+                "note": "región con <2 glifos — señales insuficientes"}
+
+    bottoms, heights, xs = [], [], []
+    x_cursor = 0
+    for m in glyph_masks:
+        ys, _ = np.where(m)
+        bottoms.append(float(ys.max()))
+        heights.append(float(m.shape[0]))
+        xs.append(float(x_cursor)); x_cursor += m.shape[1]
+    bottoms, heights, xs = map(np.array, (bottoms, heights, xs))
+
+    coef = np.polyfit(xs, bottoms, 1)
+    residual = float(np.std(bottoms - np.polyval(coef, xs)))
+    height_var = float(np.std(heights) / max(np.mean(heights), 1e-6))
+
+    s_base = max(0.0, 1.0 - residual / _RESIDUAL_NORM_PX)
+    s_height = max(0.0, 1.0 - height_var / _HEIGHT_VAR_NORM)
+    parts = [s_base, s_height]
+
+    chars = [c for c in text.lower() if not c.isspace()]
+    repeats_used = False
+    if len(chars) == len(glyph_masks):
+        idx = defaultdict(list)
+        for i, c in enumerate(chars):
+            idx[c].append(i)
+        rep_ious = []
+        for positions in idx.values():
+            for a, b in zip(positions, positions[1:]):
+                ga, gb = glyph_masks[a], glyph_masks[b]
+                gb_r = cv2.resize(gb.astype(np.uint8),
+                                  (max(1, ga.shape[1]), max(1, ga.shape[0])),
+                                  interpolation=cv2.INTER_AREA) > 0
+                rep_ious.append(_iou_centroid(ga, gb_r))
+        if rep_ious:
+            repeats_used = True
+            parts.append(float(np.mean(rep_ious)))
+
+    score = float(np.mean(parts))
+    label = ("type" if score >= CLASSIFY_TYPE_CUT
+             else "handwriting" if score <= CLASSIFY_HAND_CUT
+             else "uncertain")
+    return {"label": label, "score": round(score, 3),
+            "baseline_residual": round(residual, 2),
+            "height_var": round(height_var, 3), "repeats_used": repeats_used}
