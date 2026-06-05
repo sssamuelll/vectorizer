@@ -170,7 +170,7 @@ def download_ttf(family, cache_dir):
     (el caller cuenta las omitidas y sigue — spec, tabla de errores).
     """
     cache_dir = Path(cache_dir)
-    cache_dir.mkdir(exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / (family.replace(" ", "_") + ".ttf")
     if dest.exists():
         return dest
@@ -183,6 +183,8 @@ def download_ttf(family, cache_dir):
         data = urllib.request.urlopen(m.group(1), timeout=30).read()
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
+    # .tmp por familia: seguro solo en single-process (hecho runtime 7 del
+    # spec: OCR/spike secuencial). Si Fase A paraleliza, usar tempfile único.
     tmp = dest.with_suffix(".tmp")
     tmp.write_bytes(data)
     if not validate_ttf(tmp):
