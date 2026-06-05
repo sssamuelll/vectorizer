@@ -150,3 +150,61 @@ def test_preset_choice_deterministic(tmp_path):
     # El preset string también debe ser consistente
     cv2.setRNGSeed(0)
     assert len({vz.choose_preset(img) for _ in range(3)}) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════
+# PIPELINE COLOR END-TO-END (spec: Componente vectorize_color)
+# ═══════════════════════════════════════════════════════════════════
+
+def _path_fills(svg_file):
+    """Colores de fill presentes, robusto: atributo `fill` O `style`
+    (sin acoplarse a cómo vtracer codifique el color)."""
+    root = ET.parse(svg_file).getroot()
+    fills = set()
+    for el in root.iter():
+        f = (el.get("fill") or "").strip().lower()
+        if f.startswith("#"):
+            fills.add(f)
+        for part in (el.get("style") or "").split(";"):
+            if part.strip().lower().startswith("fill:"):
+                fills.add(part.split(":", 1)[1].strip().lower())
+    return fills
+
+
+def test_vectorize_color_4color_logo(tmp_path):
+    """Logo de 4 colores → XML válido, ≥3 fills distintos, dims correctas."""
+    p = make_logo(tmp_path / "logo.png")
+    out = vz.vectorize_color(p, output_path=tmp_path / "logo.svg")
+    root = ET.parse(out).getroot()                 # parsea = XML válido
+    assert root.get("width") == "400"
+    assert root.get("height") == "400"
+    assert root.get("viewBox") == "0 0 400 400"
+    assert len(_path_fills(out)) >= 3
+
+
+def test_vectorize_color_resizes_but_keeps_dims(tmp_path):
+    """Imagen >1200px: viewBox en dims de trabajo, width/height originales."""
+    img = np.full((1600, 800, 3), 255, np.uint8)
+    cv2.rectangle(img, (100, 100), (700, 1500), (200, 80, 30), -1)
+    p = tmp_path / "big.png"
+    cv2.imwrite(str(p), img)
+    out = vz.vectorize_color(p, output_path=tmp_path / "big.svg")
+    root = ET.parse(out).getroot()
+    assert root.get("width") == "800"
+    assert root.get("height") == "1600"
+    assert root.get("viewBox") == "0 0 600 1200"   # 1200/1600 = 0.75
+
+
+def test_vectorize_color_no_ns0_pollution(tmp_path):
+    """register_namespace evita prefijos ns0: en el roundtrip (hecho runtime 7)."""
+    p = make_logo(tmp_path / "logo.png")
+    out = vz.vectorize_color(p, output_path=tmp_path / "logo.svg")
+    assert "ns0:" not in Path(out).read_text(encoding="utf-8")
+
+
+def test_vectorize_color_unreadable_raises(tmp_path):
+    """Imagen ilegible → ValueError (igual que el pipeline handwriting)."""
+    bad = tmp_path / "bad.png"
+    bad.write_bytes(b"notapng" * 16)
+    with pytest.raises(ValueError):
+        vz.vectorize_color(bad, output_path=tmp_path / "bad.svg")

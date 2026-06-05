@@ -439,6 +439,85 @@ def choose_preset(img_bgr):
     return preset
 
 
+COLOR_PRESETS = {
+    # spec: tabla de presets. Comunes a los tres: mode=spline,
+    # hierarchical=stacked, path_precision=3 (defaults del wrapper).
+    "logo":    dict(filter_speckle=8, color_precision=6,
+                    layer_difference=48, corner_threshold=45),
+    "drawing": dict(filter_speckle=4, color_precision=7,
+                    layer_difference=24, corner_threshold=60),
+    "photo":   dict(filter_speckle=4, color_precision=8,
+                    layer_difference=12, corner_threshold=60),
+}
+
+
+def _write_svg_scaled(svg_text, out_path, orig_w, orig_h, work_w, work_h):
+    """Post-proceso del SVG de vtracer (spec, hecho runtime 7).
+
+    vtracer emite el root SIN viewBox → se añade (dims de trabajo) y se
+    reescriben width/height (dims originales) — la misma política de
+    escala del pipeline handwriting. register_namespace ANTES de parsear
+    o ElementTree contamina el roundtrip con prefijos ns0:.
+    Si el post-proceso falla: se escribe tal cual CON warning (la
+    degradación silenciosa era una contradicción del spec v1).
+    """
+    out_path = Path(out_path)
+    try:
+        ET.register_namespace("", SVG_NS)
+        root = ET.fromstring(svg_text)
+        root.set("width", str(orig_w))
+        root.set("height", str(orig_h))
+        root.set("viewBox", f"0 0 {work_w} {work_h}")
+        ET.ElementTree(root).write(out_path, encoding="utf-8",
+                                   xml_declaration=True)
+    except ET.ParseError as e:
+        print(f"  [WARN] Post-proceso del SVG falló ({e}); "
+              f"se escribe sin escalar — dims de vtracer, no originales.")
+        out_path.write_text(svg_text, encoding="utf-8")
+    return out_path
+
+
+def vectorize_color(image_path, output_path=None, preset=None, max_dim=1200,
+                    **overrides):
+    """Vectoriza una imagen a color con vtracer (logos, ilustraciones, fotos).
+
+    preset:
+      - None (default): se elige solo — ≤12 colores efectivos → logo, >12 → photo.
+      - "logo" | "drawing" | "photo": explícito.
+    max_dim: resize previo en memoria si el lado mayor lo supera (0 = sin resize).
+    overrides: filter_speckle, color_precision, layer_difference,
+               corner_threshold, path_precision — pisan el preset (None = no pisa).
+    """
+    img = load_image_bgr(image_path)
+    if img is None:
+        raise ValueError(f"No se pudo cargar: {image_path}")
+
+    orig_h, orig_w = img.shape[:2]
+    work = img
+    if max_dim and max(orig_w, orig_h) > max_dim:
+        s = max_dim / max(orig_w, orig_h)
+        work = cv2.resize(img, (int(orig_w * s), int(orig_h * s)),
+                          interpolation=cv2.INTER_AREA)
+    work_h, work_w = work.shape[:2]
+
+    if preset is None:
+        preset = choose_preset(work)
+    params = dict(COLOR_PRESETS[preset])
+    params.update({k: v for k, v in overrides.items() if v is not None})
+
+    ok, buf = cv2.imencode(".png", work)
+    if not ok:
+        raise ValueError(f"No se pudo codificar a PNG: {image_path}")
+    svg_text = _vtracer_convert(buf.tobytes(), **params)
+
+    out = Path(output_path) if output_path else Path(image_path).with_suffix(".svg")
+    _write_svg_scaled(svg_text, out, orig_w, orig_h, work_w, work_h)
+
+    print(f"  [OK] SVG: {out}")
+    print(f"       Modo: color | Preset: {preset}")
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 7. PIPELINE
 # ═══════════════════════════════════════════════════════════════════
