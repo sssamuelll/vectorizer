@@ -110,8 +110,13 @@ alternativa libre más cercana — no una identificación.
 - Región "mente": sep = 0.270, banda **OK** (> 0.2). Cumple.
 - Región "INTEGRATIVE PSYCHOLOGY": sep = 0.188, banda **MARGINAL** (0.1–0.2). No cumple stricto sensu — el cluster serif supera a los controles pero con margen insuficiente para el gate.
 
-**Condición 2 (juicio visual de Samuel):** PENDIENTE — tiras en
+**Condición 2 (juicio visual de Samuel):** **PASA** (2026-06-05) — tiras en
 `~/Desktop/fontid_gate_mente.png` y `~/Desktop/fontid_gate_integrative.png`.
+Observación registrada en el juicio: los renders top-1 se ven más pesados que el
+original (fino, alto contraste); el probing de pesos `wght` 300–700 (feature de
+Fase A) es la causa probable del desempate pendiente — se espera que promueva a
+Cormorant Garamond Light en "mente". **Veredicto: Fase A se planifica**, con el
+probing de pesos como prioridad informada por esta evidencia.
 
 **Observaciones:**
 - Región 1 ("mente"): 5 glifos segmentados correctamente (sin puntos ni acentos — límite declarado del spike no aplica aquí). Empate real entre Libre Baskerville (0.747) y Cormorant Garamond (0.737), Δ = 0.010 < TIE_DELTA (0.030). Ambas son candidatas viables; el juicio visual de Samuel es el desempate correcto.
