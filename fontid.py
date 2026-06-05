@@ -262,8 +262,10 @@ def print_region_report(idx, text, ranked, controls, skipped, mismatch):
     ties = tie_flags(ranked)
     best_control = controls[0][1] if controls else 0.0
     sep = ranked[0][1] - best_control
+    # Spec (gate condición 1): margen serif-vs-sans esperado ~0.2 (hecho runtime 6).
+    band = "OK" if sep > 0.2 else ("MARGINAL" if sep > 0.1 else "DÉBIL")
     print(f"  separación del cluster vs controles: {sep:.3f} "
-          f"({'OK' if sep > 0.1 else 'DÉBIL'} — gate condición 1)")
+          f"({band} — gate condición 1)")
     prev = None
     for i, ((fam, s), tie) in enumerate(zip(ranked[:5], ties[:5]), 1):
         delta = f"   Δ {prev - s:.3f}" if prev is not None else ""
@@ -301,6 +303,7 @@ def validate_args(args):
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")  # el reporte usa Δ/→/≠; cp1252 crashea
     args = build_parser().parse_args()
     validate_args(args)
     img = load_image_bgr(args.input)
@@ -312,8 +315,11 @@ def main():
             x0, y0, x1, y1 = (int(v) for v in reg.split(","))
         except ValueError:
             sys.exit(f"error: región inválida {reg!r} (formato x0,y0,x1,y1)")
-        ranked, controls, skipped, mismatch = rank_region(
-            img[y0:y1, x0:x1], text, args.cache_dir)
+        crop = img[y0:y1, x0:x1]
+        if crop.size == 0:
+            sys.exit(f"error: región {reg!r} fuera de los límites de la imagen "
+                     f"{img.shape[1]}x{img.shape[0]}")
+        ranked, controls, skipped, mismatch = rank_region(crop, text, args.cache_dir)
         print_region_report(i, text, ranked, controls, skipped, mismatch)
 
 
