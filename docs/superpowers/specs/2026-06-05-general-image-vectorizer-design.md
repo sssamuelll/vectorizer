@@ -250,6 +250,17 @@ diseño.
 > el logo se aplasta a una máscara binaria. Esto está **fuera de alcance de ambas fases** y
 > se documenta como limitación conocida, no como bug.
 
+**Nota cross-spec (decisión pendiente).** La **Fase B** del spec de aproximación de fuentes
+(`docs/superpowers/specs/2026-06-05-font-identification-design.md`) —recomposición de texto
+desde un archivo de fuente fusionado con el resto vectorizado— **es** tratamiento híbrido de
+imagen mixta, y por tanto **propone levantar este no-goal**. La junta del 2026-06-05 lo
+identificó como *"una contradicción con dos membretes"* (Voronov): un mismo tratamiento
+declarado fuera de alcance aquí y planificado allá. La decisión de levantar este no-goal está
+**pendiente** y se tomará de forma **explícita y documentada en AMBOS documentos**, no por
+inercia ni como hecho consumado — ver las **condiciones de Fase B** de ese spec (en
+particular, su Condición 2 exige exactamente esta resolución cross-spec antes de diseñar la
+recomposición).
+
 ## Modo directorio: resumen al final (comportamiento nuevo)
 
 El modo directorio (`vectorize.py:491-506`) gana un **resumen al final**, con:
@@ -291,6 +302,15 @@ producidos por la Fase 1. Lo que sigue acota el espacio de diseño; no lo fija.
 ## Router: `detect_image_kind(img) -> ("handwriting" | "graphic", razón)`
 
 La heurística del router se diseñará en Fase 2. Requisitos y advertencias conocidos:
+
+> **Nota cross-spec (junta 2026-06-05).** `fontid.py`
+> (`docs/superpowers/specs/2026-06-05-font-identification-design.md`) introduce un **segundo
+> clasificador de regiones** (tipografía↔handwriting). Este router introduce **otro**
+> clasificador (handwriting↔graphic). **Dos clasificadores respondiendo la misma pregunta sin
+> árbitro divergen en silencio.** Cuando este router se diseñe, ambos clasificadores **deben
+> compartir política de clasificación o declarar explícitamente cuál arbitra** — qué decide
+> qué, y en qué orden, ante una imagen que ambos podrían clasificar. Registrado también en el
+> spec de aproximación de fuentes.
 
 ### Determinismo
 
