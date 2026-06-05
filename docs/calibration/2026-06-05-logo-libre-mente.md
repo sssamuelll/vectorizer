@@ -74,3 +74,48 @@ desde píxeles.
 - El caso "logo de tinta única" refuerza que el paso de grosor-de-trazo (o un sustituto)
   importa: este logo tiene trazos finos caligráficos → handwriting fue lo correcto, pero
   un logo monocolor de bloques gruesos seguiría necesitando `graphic`.
+
+## Spike A.0 — resultado del gate (2026-06-05)
+
+```
+Corpus: Google Fonts. Si la fuente original es comercial, esto es la
+alternativa libre más cercana — no una identificación.
+
+[REGIÓN 1] "mente"
+  separación del cluster vs controles: 0.270 (OK — gate condición 1)
+  1. Libre Baskerville      overlap 0.747
+  2. Cormorant Garamond     overlap 0.737   Δ 0.010  → EMPATE con el líder
+  3. EB Garamond            overlap 0.683   Δ 0.054
+  4. Crimson Text           overlap 0.668   Δ 0.014
+  5. Lora                   overlap 0.663   Δ 0.005
+  [control] Roboto         overlap 0.477
+  [control] Montserrat     overlap 0.434
+  [control] Oswald         overlap 0.368
+  [control] Pacifico       overlap 0.309
+
+[REGIÓN 2] "INTEGRATIVE PSYCHOLOGY"
+  separación del cluster vs controles: 0.188 (MARGINAL — gate condición 1)
+  1. Source Serif 4         overlap 0.712
+  2. Spectral               overlap 0.690   Δ 0.022  → EMPATE con el líder
+  3. Frank Ruhl Libre       overlap 0.685   Δ 0.005  → EMPATE con el líder
+  4. Crimson Pro            overlap 0.683   Δ 0.002  → EMPATE con el líder
+  5. Libre Baskerville      overlap 0.674   Δ 0.009
+  [control] Roboto         overlap 0.524
+  [control] Montserrat     overlap 0.414
+  [control] Oswald         overlap 0.391
+  [control] Pacifico       overlap 0.386
+```
+
+**Condición 1 (separación medible):**
+- Región "mente": sep = 0.270, banda **OK** (> 0.2). Cumple.
+- Región "INTEGRATIVE PSYCHOLOGY": sep = 0.188, banda **MARGINAL** (0.1–0.2). No cumple stricto sensu — el cluster serif supera a los controles pero con margen insuficiente para el gate.
+
+**Condición 2 (juicio visual de Samuel):** PENDIENTE — tiras en
+`~/Desktop/fontid_gate_mente.png` y `~/Desktop/fontid_gate_integrative.png`.
+
+**Observaciones:**
+- Región 1 ("mente"): 5 glifos segmentados correctamente (sin puntos ni acentos — límite declarado del spike no aplica aquí). Empate real entre Libre Baskerville (0.747) y Cormorant Garamond (0.737), Δ = 0.010 < TIE_DELTA (0.030). Ambas son candidatas viables; el juicio visual de Samuel es el desempate correcto.
+- Región 2 ("INTEGRATIVE PSYCHOLOGY"): 21 caracteres sin espacios → 21 glifos. La versalita espaciada genera un cluster muy plano: top-4 en empate (Δ acumulado = 0.029 entre posición 1 y 4). La separación MARGINAL es esperable: versalitas de caja alta tienen proporciones más genéricas entre familias serif, acercando el gap con sans como Roboto (0.524 vs lider 0.712 = gap 0.188). Ningún fallo de segmentación — los stems finos se binarizaron correctamente a esta resolución.
+- Sin candidatas omitidas: los 24 TTFs del pool se descargaron y validaron sin errores de red.
+- Tira visual "mente": crop 600×170 px | render Libre Baskerville 120pt escalado a 620×170 px.
+- Tira visual "INTEGRATIVE PSYCHOLOGY": crop 960×100 px | render Source Serif 4 60pt escalado a 1054×100 px.
