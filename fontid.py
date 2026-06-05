@@ -192,3 +192,130 @@ def download_ttf(family, cache_dir):
         return None
     os.replace(tmp, dest)  # escritura atómica (spec)
     return dest
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 4. POOLS, RANKING Y REPORTE
+# ═══════════════════════════════════════════════════════════════════
+
+SPIKE_POOL = [
+    "Cormorant Garamond", "EB Garamond", "Cormorant SC", "Crimson Pro",
+    "Crimson Text", "Sorts Mill Goudy", "Gilda Display", "Playfair Display",
+    "Lora", "PT Serif", "Libre Baskerville", "Source Serif 4",
+    "Noto Serif Display", "Cardo", "Spectral", "Domine",
+    "Frank Ruhl Libre", "Marcellus", "Cinzel", "Old Standard TT",
+]
+# Controles negativos (sans/display/script): sin ellos la separación del
+# cluster serif sería inmedible — son la línea base del gate (spec A.0).
+CONTROLES = ["Roboto", "Montserrat", "Oswald", "Pacifico"]
+
+TIE_DELTA = 0.03  # hecho runtime 6 del spec: margen serif-vs-serif real 0.027
+
+CORPUS_NOTE = (
+    "Corpus: Google Fonts. Si la fuente original es comercial, esto es la\n"
+    "alternativa libre más cercana — no una identificación."
+)
+
+
+def tie_flags(ranked):
+    """[(familia, overlap)] ordenado desc → [bool] EMPATE-con-el-líder."""
+    if not ranked:
+        return []
+    leader = ranked[0][1]
+    return [i > 0 and (leader - s) < TIE_DELTA for i, (_, s) in enumerate(ranked)]
+
+
+def rank_region(crop_bgr, text, cache_dir):
+    """Devuelve (ranked, controls, skipped, mismatch) para una región.
+
+    mismatch: None, o (n_glifos, n_chars) si la segmentación no cuadra
+    con el texto — la región se reporta y no se rankea.
+    """
+    glyphs = segment_glyphs(crop_bgr)
+    chars = [c for c in text if not c.isspace()]
+    if len(glyphs) != len(chars):
+        return None, None, 0, (len(glyphs), len(chars))
+    ranked, controls, skipped = [], [], 0
+    for fam in SPIKE_POOL + CONTROLES:
+        ttf = download_ttf(fam, cache_dir)
+        if ttf is None:
+            skipped += 1
+            continue
+        score = match_candidate(glyphs, chars, ttf)
+        if score is None:
+            continue
+        (controls if fam in CONTROLES else ranked).append((fam, score))
+    ranked.sort(key=lambda t: -t[1])
+    controls.sort(key=lambda t: -t[1])
+    return ranked, controls, skipped, None
+
+
+def print_region_report(idx, text, ranked, controls, skipped, mismatch):
+    print(f"\n[REGIÓN {idx}] \"{text}\"")
+    if mismatch:
+        print(f"  segmentación≠texto ({mismatch[0]} glifos vs {mismatch[1]} chars)"
+              f" — no se rankea. ¿Puntos/acentos? (límite del spike)")
+        return
+    if not ranked:
+        print("  sin candidatas rankeables")
+        return
+    ties = tie_flags(ranked)
+    best_control = controls[0][1] if controls else 0.0
+    sep = ranked[0][1] - best_control
+    print(f"  separación del cluster vs controles: {sep:.3f} "
+          f"({'OK' if sep > 0.1 else 'DÉBIL'} — gate condición 1)")
+    prev = None
+    for i, ((fam, s), tie) in enumerate(zip(ranked[:5], ties[:5]), 1):
+        delta = f"   Δ {prev - s:.3f}" if prev is not None else ""
+        mark = "  → EMPATE con el líder" if tie else ""
+        print(f"  {i}. {fam:<22s} overlap {s:.3f}{delta}{mark}")
+        prev = s
+    for fam, s in controls:
+        print(f"  [control] {fam:<14s} overlap {s:.3f}")
+    if skipped:
+        print(f"  ({skipped} candidatas omitidas por red/validación)")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 5. CLI
+# ═══════════════════════════════════════════════════════════════════
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        description="Spike A.0 — aproximación de fuentes (Google Fonts). "
+                    "NO identifica: aproxima.")
+    p.add_argument("input", help="Imagen del logo")
+    p.add_argument("--region", action="append", required=True,
+                   help="x0,y0,x1,y1 (repetible, pareado con --text)")
+    p.add_argument("--text", action="append", required=True,
+                   help="Texto de la región (repetible, pareado con --region)")
+    p.add_argument("--cache-dir", default="ttf_cache",
+                   help="Caché de TTFs (default: ./ttf_cache)")
+    return p
+
+
+def validate_args(args):
+    if len(args.region) != len(args.text):
+        sys.exit(f"error: --region ({len(args.region)}) y --text "
+                 f"({len(args.text)}) deben ir pareados posicionalmente")
+
+
+def main():
+    args = build_parser().parse_args()
+    validate_args(args)
+    img = load_image_bgr(args.input)
+    if img is None:
+        raise ValueError(f"No se pudo cargar: {args.input}")
+    print(CORPUS_NOTE)
+    for i, (reg, text) in enumerate(zip(args.region, args.text), 1):
+        try:
+            x0, y0, x1, y1 = (int(v) for v in reg.split(","))
+        except ValueError:
+            sys.exit(f"error: región inválida {reg!r} (formato x0,y0,x1,y1)")
+        ranked, controls, skipped, mismatch = rank_region(
+            img[y0:y1, x0:x1], text, args.cache_dir)
+        print_region_report(i, text, ranked, controls, skipped, mismatch)
+
+
+if __name__ == "__main__":
+    main()

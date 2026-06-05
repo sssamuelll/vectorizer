@@ -104,3 +104,31 @@ def test_common_scale_penalizes_proportion_mismatch():
     assert len(glyphs_s) == 5
     s = fi.match_candidate(glyphs_s, list("mente"), WIN_FONTS / "georgia.ttf")
     assert s < base - 0.1     # la distorsión se penaliza, no se normaliza
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CLI Y REPORTE
+# ═══════════════════════════════════════════════════════════════════
+
+def test_cli_region_text_pairing():
+    """Conteos N≠M de --region/--text → SystemExit con error claro."""
+    import pytest
+    parser = fi.build_parser()
+    args = parser.parse_args(["x.png", "--region", "0,0,10,10",
+                              "--region", "0,0,20,20", "--text", "ab"])
+    with pytest.raises(SystemExit):
+        fi.validate_args(args)
+
+
+def test_ties_marked():
+    """Candidatos a <0.03 del líder se marcan EMPATE (umbral del spec)."""
+    ranked = [("A", 0.700), ("B", 0.680), ("C", 0.640)]
+    ties = fi.tie_flags(ranked)
+    assert ties == [False, True, False]   # B empata con A; C no
+
+
+def test_pool_has_controls():
+    """El pool incluye los 4 controles negativos (gate medible)."""
+    assert set(fi.CONTROLES) == {"Roboto", "Montserrat", "Oswald", "Pacifico"}
+    assert len(fi.SPIKE_POOL) == 20
+    assert not set(fi.CONTROLES) & set(fi.SPIKE_POOL)
