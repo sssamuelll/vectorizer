@@ -4,11 +4,13 @@ El test de matching usa fuentes del sistema Windows (siempre presentes).
 Nota del spec (hallazgo Null Vale): estas fixtures NO cubren la zona de
 ruido serif-vs-serif — eso lo prueba el gate del spike sobre el logo real.
 """
+import json
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -154,9 +156,6 @@ def test_vertical_fusion_preserves_mente():
 # FASE A — METADATA Y POOL (spec: hecho runtime 4, Title Case)
 # ═══════════════════════════════════════════════════════════════════
 
-import json
-import pytest
-
 
 def _fake_metadata(tmp_path):
     """Escribe un metadata.json mínimo y fresco en el cache dir."""
@@ -199,3 +198,53 @@ def test_metadata_real_download(tmp_path):
     assert len(meta) > 1500
     cats = {m.get("category") for m in meta}
     assert {"Serif", "Sans Serif", "Display"} <= cats
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — PROBING DE PESOS (spec: wght 300-700, registra el elegido)
+# ═══════════════════════════════════════════════════════════════════
+
+FAKE_CSS = """
+@font-face {
+  font-family: 'Demo';
+  font-style: normal;
+  font-weight: 300;
+  src: url(https://fonts.gstatic.com/s/demo/v1/light.ttf) format('truetype');
+}
+@font-face {
+  font-family: 'Demo';
+  font-style: normal;
+  font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/demo/v1/bold.ttf) format('truetype');
+}
+"""
+
+
+def test_parse_weight_css():
+    pairs = fi.parse_weight_css(FAKE_CSS)
+    assert pairs == [(300, "https://fonts.gstatic.com/s/demo/v1/light.ttf"),
+                     (700, "https://fonts.gstatic.com/s/demo/v1/bold.ttf")]
+
+
+def test_match_family_returns_score_weight_and_scale(tmp_path):
+    """match_family con un solo TTF local (sin red): devuelve (score, wght, s)."""
+    import shutil
+    fam_dir = tmp_path
+    shutil.copy(WIN_FONTS / "georgia.ttf", fam_dir / "Georgia_400.ttf")
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    glyphs = fi.segment_glyphs_fused(crop)
+    result = fi.match_family_local(glyphs, list("mente"),
+                                   [(400, fam_dir / "Georgia_400.ttf")])
+    assert result is not None
+    score, wght, scale = result
+    assert wght == 400
+    assert 0.5 < score <= 1.0
+    assert scale > 0
+
+
+@pytest.mark.network
+def test_weight_probing_real_garalda(tmp_path):
+    """Cormorant Garamond real: descarga ≥3 pesos; archivos validados."""
+    weights = fi.download_family_weights("Cormorant Garamond", tmp_path)
+    assert len(weights) >= 3
+    assert all(p.exists() for _, p in weights)

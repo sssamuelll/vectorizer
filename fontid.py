@@ -145,14 +145,16 @@ def _iou_centroid(a, b):
     return float(np.logical_and(A, B).sum() / union)
 
 
-def match_candidate(crop_glyphs, chars, ttf_path, base_size=96):
-    """Score de una candidata contra los glifos del crop.
+def match_candidate_detail(crop_glyphs, chars, ttf_path, base_size=96):
+    """Score + factor de escala común de una candidata.
 
-    Devuelve overlap en [0,1] (media truncada de IoU por glifo) o None
-    si la región es insuficiente (<2 glifos) o el render falla.
-    - ≥4 glifos → se descarta el peor (robustez);
+    Devuelve (overlap, s) o None si la región es insuficiente (<2 glifos),
+    los conteos no cuadran, o el render falla.
+    - ≥4 glifos → se descarta el peor IoU (robustez);
     - 2-3 glifos → media simple;
     - <2 glifos → None ("insuficiente para matching").
+    El factor s (mediana crop / mediana render) lo necesita el JSON de
+    Fase A — requisito de información de Fase B registrado en el spec.
     """
     if len(crop_glyphs) < 2 or len(crop_glyphs) != len(chars):
         return None
@@ -160,14 +162,11 @@ def match_candidate(crop_glyphs, chars, ttf_path, base_size=96):
     rendered = [render_glyph(c, font) for c in chars]
     if any(r is None for r in rendered):
         return None
-
-    # UN factor común, anclado a la altura mediana (spec, métrica del spike)
     crop_med = float(np.median([g.shape[0] for g in crop_glyphs]))
     rend_med = float(np.median([r.shape[0] for r in rendered]))
     if rend_med <= 0 or crop_med <= 0:
         return None
     s = crop_med / rend_med
-
     ious = []
     for g, r in zip(crop_glyphs, rendered):
         rs = cv2.resize(
@@ -177,11 +176,16 @@ def match_candidate(crop_glyphs, chars, ttf_path, base_size=96):
         if not rs.any():
             return None
         ious.append(_iou_centroid(g, rs))
-
     ious.sort()
     if len(ious) >= 4:
-        ious = ious[1:]  # descarta el peor glifo
-    return float(np.mean(ious))
+        ious = ious[1:]
+    return float(np.mean(ious)), s
+
+
+def match_candidate(crop_glyphs, chars, ttf_path, base_size=96):
+    """Wrapper de compatibilidad del spike: solo el score."""
+    r = match_candidate_detail(crop_glyphs, chars, ttf_path, base_size)
+    return None if r is None else r[0]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -267,15 +271,16 @@ def fetch_metadata(cache_dir):
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / "metadata.json"
+    tmp = dest.parent / (dest.name + ".tmp")
     fresh = dest.exists() and (time.time() - dest.stat().st_mtime) < METADATA_TTL_S
     if not fresh:
         try:
             raw = urllib.request.urlopen(GF_METADATA_URL, timeout=30).read()
-            tmp = dest.with_suffix(".json.tmp")
             tmp.write_bytes(raw)
             json.loads(raw.decode("utf-8"))     # valida antes de promover
             os.replace(tmp, dest)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            tmp.unlink(missing_ok=True)
             if not dest.exists():
                 raise RuntimeError(
                     "No se pudo descargar la metadata de Google Fonts y no hay "
@@ -296,6 +301,70 @@ def build_pool(metadata, pool_size=60, category=None):
     fams = [m for m in metadata if m.get("category") in cats]
     fams.sort(key=lambda m: m.get("popularity", 10 ** 9))
     return [m["family"] for m in fams[:pool_size]]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3c. PROBING DE PESOS (Fase A — prioridad #1 del gate A.0)
+# ═══════════════════════════════════════════════════════════════════
+
+WGHT_RANGE = "300..700"
+
+
+def parse_weight_css(css):
+    """CSS2 → [(wght, url_ttf)] por bloque @font-face (hecho runtime nuevo:
+    GF entrega estáticos por peso con descriptores font-weight)."""
+    pairs = []
+    for block in css.split("@font-face")[1:]:
+        mw = re.search(r"font-weight:\s*(\d+)", block)
+        mu = re.search(r"url\((https://[^)]+\.ttf)\)", block)
+        if mw and mu:
+            pairs.append((int(mw.group(1)), mu.group(1)))
+    return pairs
+
+
+def download_family_weights(family, cache_dir):
+    """Descarga los pesos estáticos 300..700 de una familia (atómico+validado).
+
+    Devuelve [(wght, Path)] de los que existen/validaron. Lista vacía si la
+    red falla por completo (el caller cuenta la familia como omitida).
+    """
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    base = family.replace(" ", "_")
+    try:
+        url = GF_CSS2.format(urllib.parse.quote_plus(family)) + ":wght@" + WGHT_RANGE
+        css = urllib.request.urlopen(url, timeout=20).read().decode("utf-8")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return []
+    out = []
+    for wght, ttf_url in parse_weight_css(css):
+        dest = cache_dir / f"{base}_{wght}.ttf"
+        if not dest.exists():
+            try:
+                data = urllib.request.urlopen(ttf_url, timeout=30).read()
+            except (urllib.error.URLError, TimeoutError, OSError):
+                continue
+            tmp = dest.parent / (dest.name + ".tmp")
+            tmp.write_bytes(data)
+            if not validate_ttf(tmp):
+                tmp.unlink(missing_ok=True)
+                continue
+            os.replace(tmp, dest)
+        out.append((wght, dest))
+    return out
+
+
+def match_family_local(crop_glyphs, chars, weight_paths):
+    """Prueba cada (wght, ttf) y conserva el mejor. → (score, wght, s) | None."""
+    best = None
+    for wght, path in weight_paths:
+        r = match_candidate_detail(crop_glyphs, chars, path)
+        if r is None:
+            continue
+        score, s = r
+        if best is None or score > best[0]:
+            best = (score, wght, s)
+    return best
 
 
 # ═══════════════════════════════════════════════════════════════════
