@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+svg_output/
+.venv/
+venv/
