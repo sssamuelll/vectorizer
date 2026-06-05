@@ -132,3 +132,19 @@ def test_pool_has_controls():
     assert set(fi.CONTROLES) == {"Roboto", "Montserrat", "Oswald", "Pacifico"}
     assert len(fi.SPIKE_POOL) == 20
     assert not set(fi.CONTROLES) & set(fi.SPIKE_POOL)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — FUSIÓN VERTICAL (spec: hecho runtime 5)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_vertical_fusion_integrative():
+    """'integrative' (11 letras, 2 íes con punto) → 11 glifos TRAS fusión."""
+    crop = _render_word_bgr("integrative", WIN_FONTS / "georgia.ttf")
+    assert len(fi.segment_glyphs_fused(crop)) == 11
+
+
+def test_vertical_fusion_preserves_mente():
+    """Sin puntos, la fusión no altera nada: 'mente' sigue siendo 5."""
+    crop = _render_word_bgr("mente", WIN_FONTS / "georgia.ttf")
+    assert len(fi.segment_glyphs_fused(crop)) == 5

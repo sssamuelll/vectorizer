@@ -55,6 +55,51 @@ def segment_glyphs(crop_bgr, min_area=4):
     return [m for _, m in comps]
 
 
+def _x_overlap(a, b):
+    """Fracción de solape horizontal entre dos intervalos (x0, x1)."""
+    lo, hi = max(a[0], b[0]), min(a[1], b[1])
+    if hi <= lo:
+        return 0.0
+    return (hi - lo) / min(a[1] - a[0], b[1] - b[0])
+
+
+def segment_glyphs_fused(crop_bgr, min_area=4, overlap_frac=0.5):
+    """Segmentación Fase A: componentes conexos + fusión vertical.
+
+    Componentes cuyo rango x se solapa ≥ overlap_frac con otro (punto de
+    la i/j, acentos) se fusionan en un solo glifo (spec, hecho runtime 5:
+    sin esto 'integrative' da 13 componentes para 11 letras).
+    """
+    gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
+    flag = cv2.THRESH_BINARY_INV if np.mean(gray) > 127 else cv2.THRESH_BINARY
+    _, binary = cv2.threshold(gray, 0, 255, flag | cv2.THRESH_OTSU)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (binary > 0).astype(np.uint8), connectivity=8)
+    boxes = []  # (x0, x1, y0, y1, comp_ids)
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if area < min_area:
+            continue
+        boxes.append([x, x + w, y, y + h, [i]])
+    boxes.sort(key=lambda b: b[0])
+
+    fused = []
+    for b in boxes:
+        if fused and _x_overlap((fused[-1][0], fused[-1][1]), (b[0], b[1])) >= overlap_frac:
+            prev = fused[-1]
+            prev[0] = min(prev[0], b[0]); prev[1] = max(prev[1], b[1])
+            prev[2] = min(prev[2], b[2]); prev[3] = max(prev[3], b[3])
+            prev[4].extend(b[4])
+        else:
+            fused.append(b)
+
+    glyphs = []
+    for x0, x1, y0, y1, ids in fused:
+        m = np.isin(labels[y0:y1, x0:x1], ids)
+        glyphs.append(m)
+    return glyphs
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 2. RENDER + MATCHING (métrica del spec: factor de escala COMÚN —
 #    las proporciones relativas entre glifos sobreviven y los
