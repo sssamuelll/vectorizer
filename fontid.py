@@ -10,6 +10,7 @@ Uso:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -514,6 +515,73 @@ def main():
                      f"{img.shape[1]}x{img.shape[0]}")
         ranked, controls, skipped, mismatch = rank_region(crop, text, args.cache_dir)
         print_region_report(i, text, ranked, controls, skipped, mismatch)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3f. NOMINACIÓN API (Fase A — opt-in explícito con --api; la sola
+#     presencia de ANTHROPIC_API_KEY no activa nada. La API solo NOMINA:
+#     toda verificación es local. Hallazgo Null Vale reconocido: nominar
+#     dentro de un pool acotado ES decidir el espacio de búsqueda — por
+#     eso el default es sin API y lo nominado se marca [API].)
+# ═══════════════════════════════════════════════════════════════════
+
+NOMINATION_MODEL = "claude-haiku-4-5"   # decisión del spec (costo céntimos)
+NOMINATION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "families": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["families"],
+    "additionalProperties": False,
+}
+
+
+def nominate_via_api(crop_pngs, texts, max_families=10):
+    """UN solo call de visión → hasta 10 nombres de familias GF plausibles.
+
+    Cualquier fallo (SDK ausente, key ausente, error de API) → lista
+    vacía con warning. El pipeline local sigue idéntico.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        print("  [WARN] --api: el paquete 'anthropic' no está instalado "
+              "(pip install anthropic). Sigo sin nominación.")
+        return []
+    content = []
+    for png in crop_pngs:
+        content.append({"type": "image",
+                        "source": {"type": "base64", "media_type": "image/png",
+                                   "data": base64.standard_b64encode(png).decode()}})
+    content.append({"type": "text", "text": (
+        "Cada imagen es un recorte de texto tipográfico de un logo. Los "
+        f"textos son: {texts}. Nombra hasta {max_families} familias de "
+        "GOOGLE FONTS (nombres exactos del catálogo) visualmente más "
+        "parecidas a la tipografía de los recortes, ordenadas de más a "
+        "menos plausible.")})
+    try:
+        client = anthropic.Anthropic()   # resuelve ANTHROPIC_API_KEY del entorno
+        resp = client.messages.create(
+            model=NOMINATION_MODEL,
+            max_tokens=1024,
+            output_config={"format": {"type": "json_schema",
+                                      "schema": NOMINATION_SCHEMA}},
+            messages=[{"role": "user", "content": content}],
+        )
+        text = next(b.text for b in resp.content if b.type == "text")
+        fams = json.loads(text)["families"][:max_families]
+        return [f.strip() for f in fams if isinstance(f, str) and f.strip()]
+    except Exception as e:
+        print(f"  [WARN] --api falló ({type(e).__name__}); sigo sin nominación.")
+        return []
+
+
+def merge_nominations(pool, nominated):
+    """Nominadas primero (prioridad), sin duplicados. Devuelve además el
+    set de familias que entraron SOLO por la API (para marcar [API])."""
+    api_only = {f for f in nominated if f not in pool}
+    merged = list(dict.fromkeys(list(nominated) + list(pool)))
+    return merged, api_only
 
 
 if __name__ == "__main__":

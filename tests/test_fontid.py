@@ -339,3 +339,29 @@ def test_classify_jittered_glyphs_scores_handwriting_side():
         jit_boxes.append((x0, y0 + dy, x1, y0 + dy + h))
     jit = fi.classify_region(masks, "mente sana", boxes=jit_boxes)
     assert jit["score"] < clean["score"]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# FASE A — NOMINACIÓN API (opt-in, solo nomina, falla → lista vacía)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_api_nomination_failure_returns_empty(monkeypatch):
+    """Sin SDK / sin key / API caída → [] con warning, jamás crash."""
+    import builtins
+    real_import = builtins.__import__
+
+    def no_anthropic(name, *a, **k):
+        if name == "anthropic":
+            raise ImportError("simulado")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_anthropic)
+    assert fi.nominate_via_api([b"fakepng"], ["mente"]) == []
+
+
+def test_merge_nominations_marks_and_prioritizes():
+    pool = ["Lora", "Roboto"]
+    merged, api_set = fi.merge_nominations(pool, ["Cormorant SC", "Lora"])
+    assert merged[0] == "Cormorant SC"          # nominada primero
+    assert merged.count("Lora") == 1            # sin duplicados
+    assert api_set == {"Cormorant SC"}          # solo lo NUEVO se marca [API]
