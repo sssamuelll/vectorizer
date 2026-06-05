@@ -37,6 +37,36 @@ Fase 2 (spec: "Calibración de umbrales contra corpus real").
 5. Menor, pre-existente: `np.cross` emite DeprecationWarning (NumPy 2.0) en `rdp_simplify`
    (`vectorize.py:256`) al correr contour. Limpieza barata pendiente.
 
+## Sweep de suavizado (contour, 5 variantes juzgadas visualmente)
+
+| variante | flags | small text | caligrafía | suavidad | KB |
+|---|---|---|---|---|---|
+| A | defaults (blur 3, rdp 1.0, chaikin 2) | 4 | 8 | 6 | 92.9 |
+| **B** | `--blur 1 --rdp 0.4 --chaikin 3` | **6** | **9** | **7** | 342 |
+| C | `--blur 3 --rdp 0.5 --chaikin 3 --tension 0.6` | 6 | 8 | 7 | 339.8 |
+| D | `--blur 5 --rdp 0.8 --chaikin 4` | 3 | 9 | 7 | 506.8 |
+| E | `--blur 0 --rdp 0.3 --chaikin 3` | 6 | 8 | 6.5 | 345.8 |
+
+**Ganadora: B** (`--blur 1 --rdp 0.4 --chaikin 3`) — mejor caligrafía sin sacrificar el
+texto pequeño más de lo inevitable. Hallazgo unánime de las 5 evaluaciones: **ninguna
+combinación de knobs arregla "INTEGRATIVE PSYCHOLOGY"** — los stems finos de las versalitas
+se erosionan en todas las variantes.
+
+## Causa raíz del texto pequeño: la resolución, no el suavizado
+
+Probe a resolución nativa (1507px, saltando el resize hardcodeado a 1200px del pipeline
+handwriting, mismos parámetros que B): el texto pequeño **recupera el peso de trazo y las
+serifas casi por completo**. Comparación visual directa original/1200px/nativo lo confirma.
+
+**Acción candidata (Fase 1.x):** extender `--max-dim` a los modos handwriting (default 1200
+→ cero regresión; opt-in a resolución nativa con `--max-dim 0`). Hoy `--max-dim` es solo
+del pipeline color.
+
+**Límite estructural:** aún a resolución nativa, la tipografía serif pequeña vectorizada
+desde píxeles no iguala al original — evidencia directa para la feature de identificación
+de fuentes (en diseño): texto tipográfico se replica mejor desde el archivo de fuente que
+desde píxeles.
+
 ## Implicaciones acumuladas para Fase 2
 
 - El router debe tolerar 3-5 colores efectivos en imágenes que son conceptualmente
