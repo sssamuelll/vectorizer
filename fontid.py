@@ -299,7 +299,8 @@ def fetch_metadata(cache_dir):
                     "No se pudo descargar la metadata de Google Fonts y no hay "
                     "caché previa. Revisa la red o usa --region/--text con "
                     "--pool-file manual.") from None
-            print("  [WARN] metadata GF: sin red; usando caché vencida.")
+            print("  [WARN] metadata GF: sin red; usando caché vencida.",
+                  file=sys.stderr)  # stderr: no contaminar --json
     return json.loads(dest.read_text(encoding="utf-8"))["familyMetadataList"]
 
 
@@ -728,7 +729,7 @@ def nominate_via_api(crop_pngs, texts, max_families=10):
         import anthropic
     except ImportError:
         print("  [WARN] --api: el paquete 'anthropic' no está instalado "
-              "(pip install anthropic). Sigo sin nominación.")
+              "(pip install anthropic). Sigo sin nominación.", file=sys.stderr)
         return []
     content = []
     for png in crop_pngs:
@@ -754,7 +755,8 @@ def nominate_via_api(crop_pngs, texts, max_families=10):
         fams = json.loads(text)["families"][:max_families]
         return [f.strip() for f in fams if isinstance(f, str) and f.strip()]
     except Exception as e:
-        print(f"  [WARN] --api falló ({type(e).__name__}); sigo sin nominación.")
+        print(f"  [WARN] --api falló ({type(e).__name__}); sigo sin nominación.",
+              file=sys.stderr)
         return []
 
 
