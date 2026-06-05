@@ -362,7 +362,7 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 6.5. WRAPPER VTRACER (posicional-only)
+# 6.5. PIPELINE DE COLOR (vtracer)
 # ═══════════════════════════════════════════════════════════════════
 
 SVG_NS = "http://www.w3.org/2000/svg"
