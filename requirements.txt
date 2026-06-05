@@ -5,3 +5,9 @@ numpy>=1.24
 vtracer>=0.6.15
 # dev
 pytest>=8
+# fontid (aproximación de fuentes):
+# winocr usa el OCR nativo de Windows (winrt) — Windows-only; además
+# requiere un language pack OCR de script latino instalado en el SO.
+winocr
+# anthropic: SOLO para fontid --api (nominación opt-in). Opcional.
+anthropic

@@ -68,6 +68,29 @@ Notas:
 - **Cambio de alpha (todos los modos):** los PNG con transparencia ahora se componen sobre blanco (antes el canal alpha se descartaba, dejando fondo negro). Para imágenes sin alpha nada cambia.
 - Los flags handwriting (`--blur`, `--rdp`, etc.) no aplican al modo color; si los pasas, el script lo avisa con un warning.
 
+## fontid — aproximación de fuentes (Fase A)
+
+Cuando un logo contiene texto compuesto en una fuente, recomponerlo desde el
+archivo de fuente supera cualquier vectorización. `fontid.py` encuentra **la
+alternativa más cercana dentro de Google Fonts** — no identifica la fuente
+original (que probablemente es comercial); aproxima, y lo dice en cada reporte.
+
+```bash
+python fontid.py logo.png                          # automático (OCR — Windows-only)
+python fontid.py logo.png --region 450,600,1050,770 --text "mente"   # manual (cualquier SO)
+python fontid.py logo.png --preview --json         # tira comparativa + salida máquina
+python fontid.py logo.png --api                    # nominación Claude (opt-in: envía crops a Anthropic)
+```
+
+- Scores: **overlaps crudos en [0,1]** con umbral de empate 0.03 — nunca porcentajes.
+- Reporte de dos niveles: el cluster es confiable; el orden interno de un cluster
+  empatado no, y el reporte lo marca (`EMPATE`).
+- Prueba pesos `wght` 300–700 por familia y reporta el elegido.
+- `--api` jamás se activa solo por tener `ANTHROPIC_API_KEY` — es opt-in explícito
+  (los logos pueden ser material confidencial).
+- Con `--json` la salida es solo JSON (pipe-limpio); es una **emisión draft** (su
+  esquema puede cambiar cuando la Fase B de recomposición firme sus requisitos).
+
 ## Parámetros
 
 | flag | default | qué controla |
