@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Vectorizador de Handwriting a SVG — v5 Final (Limpio)
+Vectorizador de imágenes a SVG — dos pipelines:
+
+Handwriting (modos contour/skeleton/both):
   • Color real del trazo (filtro HSV)
   • Limpieza automática de ruido y líneas
   • Skeleton tracing con loops cerrados
   • Agujeros topológicos reales
   • Curvas Bézier cúbicas suaves
 
+Color (--mode color, vía vtracer):
+  • Logos, ilustraciones y fotos (posterizadas)
+  • Presets logo/drawing/photo + flags de ajuste fino
+
 Dependencias:
-    pip install opencv-python numpy
+    pip install -r requirements.txt
+    (opencv-contrib-python, numpy; vtracer solo para --mode color)
 """
 
 import cv2
@@ -660,7 +667,9 @@ def build_parser():
     parser.add_argument("--tension", type=float, default=0.5)
     parser.add_argument("--width", type=float, default=2.0,
                         help="Stroke width for skeleton mode")
-    parser.add_argument("--color", default=None, help="Forzar color hex")
+    parser.add_argument("--color", default=None,
+                        help="Forzar color hex del trazo (solo handwriting; "
+                             "no confundir con --colors, que es del modo color)")
     parser.add_argument("--no-auto-color", action="store_true")
     # flags color (solo modo color)
     parser.add_argument("--preset", choices=("logo", "drawing", "photo"),
