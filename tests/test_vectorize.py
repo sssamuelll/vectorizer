@@ -2,6 +2,7 @@
 
 Fixtures sintéticas generadas in-test con numpy/cv2 (cero binarios commiteados).
 """
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -24,6 +25,17 @@ def make_logo(path, size=400):
     cv2.rectangle(img, (40, 40), (200, 200), (60, 60, 230), -1)    # rojo
     cv2.rectangle(img, (220, 80), (360, 320), (230, 120, 40), -1)  # azul
     cv2.circle(img, (200, 300), 70, (80, 180, 60), -1)             # verde
+    cv2.imwrite(str(path), img)
+    return path
+
+
+def make_gradient(path, size=256):
+    """Gradiente diagonal full-color — sensible a la inicialización del
+    k-means (bajo RANDOM_CENTERS el conteo oscila; con el régimen
+    determinista no debe oscilar jamás)."""
+    y, x = np.mgrid[0:size, 0:size]
+    img = np.stack([x * 255 // size, y * 255 // size,
+                    (x + y) * 255 // (2 * size)], axis=-1).astype(np.uint8)
     cv2.imwrite(str(path), img)
     return path
 
@@ -75,10 +87,41 @@ def test_vtracer_wrapper_returns_svg(tmp_path):
 # ═══════════════════════════════════════════════════════════════════
 
 def test_effective_colors_deterministic(tmp_path):
-    """Misma imagen → mismo conteo en corridas repetidas."""
-    img = cv2.imread(str(make_logo(tmp_path / "logo.png")))
-    runs = [vz.count_effective_colors(img) for _ in range(3)]
-    assert runs[0] == runs[1] == runs[2]
+    """Misma imagen → mismo conteo, sin importar el estado global del RNG.
+
+    Usa el gradiente (divergence-prone): bajo RANDOM_CENTERS el conteo
+    oscila entre 15 y 16. La técnica de pre-seed inyecta estados de RNG
+    distintos ANTES de cada llamada; si count_effective_colors reimpone su
+    propia semilla (régimen determinista), todos los resultados coinciden.
+    Si se quita cv2.setRNGSeed o se cambia a RANDOM_CENTERS, los distintos
+    pre-seeds producen resultados distintos y el assert falla de forma
+    determinista (no estocástica). Verificado empíricamente: seeds 0-9
+    producen al menos dos valores distintos bajo el régimen saboteado."""
+    p = make_gradient(tmp_path / "grad.png")
+    img = cv2.imread(str(p))
+    # Inyectar 10 estados de RNG distintos antes de cada llamada.
+    # Con el régimen correcto, count_effective_colors override la semilla →
+    # todos los resultados son idénticos.
+    pre_seeds = list(range(10))
+    runs = []
+    for s in pre_seeds:
+        cv2.setRNGSeed(s)
+        runs.append(vz.count_effective_colors(img))
+    assert len(set(runs)) == 1, (
+        f"count_effective_colors no es determinista: resultados={runs}"
+    )
+
+    repo = Path(vz.__file__).resolve().parent
+    code = (f"import sys; sys.path.insert(0, {str(repo)!r}); "
+            f"import cv2, vectorize; "
+            f"print(vectorize.count_effective_colors(cv2.imread({str(p)!r})))")
+    outs = set()
+    for _ in range(2):
+        r = subprocess.run([sys.executable, "-c", code],
+                           capture_output=True, text=True, check=True)
+        outs.add(r.stdout.strip())
+    assert len(outs) == 1
+    assert int(outs.pop()) == runs[0]
 
 
 def test_preset_choice_logo_vs_photo(tmp_path):
@@ -91,6 +134,19 @@ def test_preset_choice_logo_vs_photo(tmp_path):
 
 
 def test_preset_choice_deterministic(tmp_path):
-    """Misma imagen → mismo preset siempre (test del grupo 'Preset determinista')."""
-    img = cv2.imread(str(make_logo(tmp_path / "logo.png")))
+    """Misma imagen → mismo conteo y mismo preset siempre (fixture divergence-prone).
+
+    Pre-seed technique: inyecta estados distintos del RNG global antes de
+    cada llamada para garantizar que el test falla bajo sabotaje.
+    Verifica tanto el conteo numérico (más sensible) como el preset string."""
+    img = cv2.imread(str(make_gradient(tmp_path / "grad.png")))
+    counts = []
+    for s in range(10):
+        cv2.setRNGSeed(s)
+        counts.append(vz.count_effective_colors(img))
+    assert len(set(counts)) == 1, (
+        f"count_effective_colors no es determinista: conteos={counts}"
+    )
+    # El preset string también debe ser consistente
+    cv2.setRNGSeed(0)
     assert len({vz.choose_preset(img) for _ in range(3)}) == 1
