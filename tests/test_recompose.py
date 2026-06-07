@@ -183,6 +183,21 @@ def test_resolve_ttf_peso_inexistente_error_duro(tmp_path, monkeypatch):
     assert "900" in str(e.value) and "400" in str(e.value)
 
 
+def test_resolve_ttf_rechaza_familia_con_ruta(tmp_path, monkeypatch):
+    """Cache-key traversal: familia con / \\ o .. rechazada ANTES de
+    intentar download."""
+    # Mock que vería se llama — si se llama, el test falla.
+    calls = []
+    monkeypatch.setattr(recompose, "download_family_weights",
+                        lambda fam, cd: (calls.append(fam), [])[1])
+    for malo in ("../evil", "a/b", "a\\b"):
+        with pytest.raises(recompose.FontKeyError) as exc:
+            recompose.resolve_ttf(malo, 400, tmp_path)
+        # Verificar que download NO se llamó.
+        assert malo not in calls, \
+            f"download_family_weights se llamó con {malo!r} — validación inefectiva"
+
+
 # ── caligrafía + composición ────────────────────────────────────────
 
 def _logo_sintetico():

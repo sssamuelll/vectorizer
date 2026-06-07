@@ -190,6 +190,10 @@ def resolve_ttf(family, wght, cache_dir):
     La familia puede NO estar en el ranking (regla de soberanía: el ojo
     elige fuera del menú — caso Nanum Myeongjo). Peso inexistente →
     FontKeyError con los disponibles."""
+    # Sanitizar la clave de caché: rechazar ruta traversal (spec HF5)
+    if any(sep in family for sep in ("/", "\\", "..")) or family != family.strip():
+        raise FontKeyError(f"nombre de familia inválido: {family!r}")
+
     cache_dir = Path(cache_dir)
     cached = cache_dir / f"{family.replace(' ', '_')}_{wght}.ttf"
     if cached.exists():
