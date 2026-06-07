@@ -197,6 +197,16 @@ def test_compose_svg_estructura():
     assert "ns0" not in svg_text        # ley del repo: sin pollution
 
 
+def test_compose_svg_con_provenance():
+    svg_text = recompose.compose_svg(
+        100, 50, "#000", ["M 0 0 L 1 1 Z"],
+        [("M 0 0 Z", "translate(0 0) scale(1 -1)")],
+        provenance=["Fam A:400 sha256:abcd1234"])
+    assert "TTF provenance" in svg_text and "abcd1234" in svg_text
+    ET.fromstring(svg_text)          # sigue siendo XML válido
+    assert "ns0" not in svg_text
+
+
 # ── preview + comandos de corrección (spec §6) ──────────────────────
 
 def test_correction_commands_eco_de_la_decision(capsys):
@@ -298,6 +308,7 @@ def test_main_camino_feliz_sin_empate(monkeypatch, tmp_path, capsys):
     assert svg.exists()
     texto = svg.read_text(encoding="utf-8")
     assert 'class="ink"' in texto and 'class="type"' in texto
+    assert "TTF provenance" in texto
     assert svg.with_name(svg.stem + "_preview.png").exists()
     assert "re-corridas" in capsys.readouterr().out
 

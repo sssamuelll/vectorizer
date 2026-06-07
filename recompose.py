@@ -15,6 +15,7 @@ Superficie de import CERRADA (test AST la vigila):
              clean_binary_mask
 """
 import argparse
+import hashlib
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
@@ -217,8 +218,13 @@ def binary_ink_mask(img_bgr):
     return binary
 
 
-def compose_svg(w, h, ink, callig_paths, glyph_pairs):
-    """SVG híbrido: grupo .ink (caligrafía) + grupo .type (texto TTF)."""
+def compose_svg(w, h, ink, callig_paths, glyph_pairs, provenance=None):
+    """SVG híbrido: grupo .ink (caligrafía) + grupo .type (texto TTF).
+
+    provenance: lista de strings «familia:peso sha256:<hex>» que se emiten
+    como comentario XML antes del primer grupo (spec §8 — trazabilidad barata
+    de la deriva upstream).
+    """
     svg = ET.Element("svg", {
         "xmlns": "http://www.w3.org/2000/svg", "version": "1.1",
         "width": str(w), "height": str(h), "viewBox": f"0 0 {w} {h}",
@@ -227,6 +233,8 @@ def compose_svg(w, h, ink, callig_paths, glyph_pairs):
     style = ET.SubElement(defs, "style")
     style.text = (f".ink {{ fill: {ink}; fill-rule: evenodd; stroke: none; }} "
                   f".type {{ fill: {ink}; stroke: none; }}")
+    if provenance:
+        svg.append(ET.Comment(" TTF provenance: " + "; ".join(provenance) + " "))
     g_ink = ET.SubElement(svg, "g", {"class": "ink"})
     for d in callig_paths:
         ET.SubElement(g_ink, "path", {"d": d})
@@ -387,6 +395,7 @@ def main():
     glyph_pairs = []
     mask_boxes = []
     final_choices = {}
+    provenance = []
     for i in recomp_idx:
         r = regions[i]
         family, wght = choices[i]
@@ -395,6 +404,8 @@ def main():
         except FontKeyError as e:
             print(f"error: {e}", file=sys.stderr)
             raise SystemExit(EXIT_FONT_KEY)
+        sha = hashlib.sha256(ttf.read_bytes()).hexdigest()[:16]
+        provenance.append(f"{family}:{wght} sha256:{sha}")
         chars = [c for c in r.text if not c.isspace()]
         glyph_pairs.extend(region_glyph_paths(ttf, chars, r.glyph_boxes))
         mask_boxes.append(r.bbox)
@@ -402,7 +413,7 @@ def main():
 
     callig = calligraphy_paths(img, mask_boxes, sigma=args.contour_sigma)
     ink = extract_stroke_color(img, binary_ink_mask(img))
-    svg_text = compose_svg(w, h, ink, callig, glyph_pairs)
+    svg_text = compose_svg(w, h, ink, callig, glyph_pairs, provenance=provenance)
 
     out_path = (Path(args.output) if args.output
                 else Path(args.input).with_name(
