@@ -512,6 +512,32 @@ def test_analyze_regions_conteo_desigual_sin_ranking(monkeypatch):
     assert out[0].classification == "type" and out[0].ranking == []
 
 
+def test_analyze_regions_uncertain_sin_ranking(monkeypatch):
+    """uncertain NO se rankea en la fachada (divergencia deliberada con
+    main(), que sí lo muestra al humano): la costura solo recompone type."""
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (20, 30, 150, 100), "text": "abc", "word_boxes": []}])
+    monkeypatch.setattr(fi, "classify_region",
+                        lambda g, t, boxes=None: {"label": "uncertain",
+                                                  "score": 0.5})
+    llamado = []
+    monkeypatch.setattr(fi, "fetch_metadata",
+                        lambda cd: llamado.append(1) or [])
+    out = fi.analyze_regions(img)
+    assert out[0].classification == "uncertain" and out[0].ranking == []
+    assert not llamado
+
+
+def test_analyze_regions_region_degenerada_se_omite(monkeypatch, capsys):
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (50, 30, 50, 100), "text": "x", "word_boxes": []}])
+    out = fi.analyze_regions(img)
+    assert out == []
+    assert "degenerada" in capsys.readouterr().err
+
+
 def test_main_guard_is_last_statement():
     """El guard __main__ debe ser el ÚLTIMO statement del módulo — si queda
     arriba de funciones, el flujo auto muere con NameError al correr como

@@ -999,15 +999,23 @@ def analyze_regions(img_bgr, cache_dir=CACHE_DIR_DEFAULT, pool_size=60,
     al menos una región type con conteo glifos==chars (rankeable).
     Regiones type con conteo desigual quedan con ranking=[] — el caller
     decide la degradación (spec §7).
+    Nota: las nominaciones --api no pasan por la fachada (diferido; main() de fontid las sigue soportando).
     """
     prelim = []
     for reg in detect_regions(img_bgr):
         x0, y0, x1, y1 = reg["bbox"]
+        if x1 <= x0 or y1 <= y0:
+            print(f"  [WARN] región degenerada {reg['bbox']} — omitida",
+                  file=sys.stderr)
+            continue
         glyphs, gboxes = segment_glyphs_with_boxes(img_bgr[y0:y1, x0:x1])
         abs_boxes = [(int(bx0 + x0), int(by0 + y0), int(bx1 + x0), int(by1 + y0))
                      for bx0, by0, bx1, by1 in gboxes]
         cls = classify_region(glyphs, reg["text"], boxes=gboxes)
         chars = [c for c in reg["text"] if not c.isspace()]
+        # DELIBERADO: solo "type" es rankeable aquí (la costura de Fase B
+        # solo recompone type). main() en cambio rankea también "uncertain"
+        # para el reporte humano — divergencia documentada, no accidental.
         rankeable = cls["label"] == "type" and len(glyphs) == len(chars)
         prelim.append((reg, glyphs, abs_boxes, cls, chars, rankeable))
 
