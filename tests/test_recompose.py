@@ -96,3 +96,42 @@ def test_reporte_costura_siempre_lista_todas(capsys):
     out = capsys.readouterr().out
     assert "mente" in out and "libre" in out
     assert "recompone" in out and "vectoriza" in out
+
+
+# ── colocación (port verificado de scratch_perfect.py) ──────────────
+
+def test_common_scale_mediana():
+    font_bboxes = [(0, 0, 100, 200), (0, 0, 100, 100), (0, -50, 100, 150)]
+    glyph_boxes = [(0, 0, 10, 30), (20, 0, 30, 20), (40, 0, 50, 30)]
+    s = recompose.common_scale(font_bboxes, glyph_boxes)
+    # ratios: 30/200=0.15, 20/100=0.20, 30/200=0.15 → mediana 0.15
+    assert abs(s - 0.15) < 1e-9
+
+
+def test_glyph_transform_alinea_centro_y_fondo():
+    """El bbox renderizado debe calzar centro-x y fondo del box original
+    (overshoot incluido) — la verificación 0.0px del prototipo, como assert."""
+    fb = (10, -20, 110, 180)        # font units, y-up
+    gb = (100, 50, 160, 110)        # imagen, y-down
+    s = 0.3
+    tr = recompose.glyph_transform(fb, gb, s)
+    tx = float(tr.split("(")[1].split()[0])
+    ty = float(tr.split("(")[1].split(")")[0].split()[1])
+    # bbox renderizado: x ∈ [tx+s*xmin, tx+s*xmax], y_bottom = ty - s*ymin
+    cx_render = tx + s * (fb[0] + fb[2]) / 2.0
+    assert abs(cx_render - (gb[0] + gb[2]) / 2.0) < 1e-6
+    assert abs((ty + s * fb[1]) - gb[3]) < 1e-6
+
+
+CACHE = Path.home() / ".cache" / "vectorizer-fonts"
+TTF_TEST = CACHE / "Cormorant_Garamond_500.ttf"
+
+
+@pytest.mark.skipif(not TTF_TEST.exists(),
+                    reason="TTF de caché no disponible (corre fontid primero)")
+def test_region_glyph_paths_con_ttf_real():
+    boxes = [(100 + i * 60, 50, 150 + i * 60, 110) for i in range(5)]
+    pairs = recompose.region_glyph_paths(TTF_TEST, "mente", boxes)
+    assert len(pairs) == 5
+    for d, tr in pairs:
+        assert d and tr.startswith("translate(")

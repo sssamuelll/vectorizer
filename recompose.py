@@ -123,6 +123,50 @@ def print_seam_report(regions, decisions):
         print(f"  [{i}] \"{r.text}\" → se {verbo} — {d.reason}")
 
 
+def common_scale(font_bboxes, glyph_boxes):
+    """Escala COMÚN por región: mediana de (altura box original / altura
+    glifo en font units). Misma filosofía que la métrica de matching —
+    las proporciones relativas entre glifos sobreviven."""
+    ratios = [(y1 - y0) / (fb[3] - fb[1])
+              for fb, (x0, y0, x1, y1) in zip(font_bboxes, glyph_boxes)
+              if fb is not None and fb[3] - fb[1] > 0]
+    if not ratios:
+        raise ValueError("ningún glifo con bbox válido para la escala")
+    return float(np.median(ratios))
+
+
+def glyph_transform(font_bbox, glyph_box, s):
+    """Transform SVG: centro-x alineado, fondo del bbox alineado (el
+    overshoot de las redondas viene gratis). Font units son y-up → scale -s."""
+    xmin, ymin, xmax, ymax = font_bbox
+    x0, y0, x1, y1 = glyph_box
+    cx = (x0 + x1) / 2.0
+    tx = cx - s * (xmin + xmax) / 2.0
+    ty = y1 - s * ymin
+    return f"translate({tx:.2f} {ty:.2f}) scale({s:.5f} -{s:.5f})"
+
+
+def region_glyph_paths(ttf_path, chars, glyph_boxes):
+    """[(path_d, transform)] por glifo. chars SIN espacios, len == len(boxes)
+    (la costura ya lo garantizó). KeyError si un char no está en el cmap."""
+    font = TTFont(str(ttf_path))
+    glyph_set = font.getGlyphSet()
+    cmap = font.getBestCmap()
+    info = []
+    for ch in chars:
+        gname = cmap[ord(ch)]
+        bp = BoundsPen(glyph_set)
+        glyph_set[gname].draw(bp)
+        info.append((gname, bp.bounds))
+    s = common_scale([fb for _, fb in info], glyph_boxes)
+    out = []
+    for (gname, fb), box in zip(info, glyph_boxes):
+        pen = SVGPathPen(glyph_set)
+        glyph_set[gname].draw(pen)
+        out.append((pen.getCommands(), glyph_transform(fb, box, s)))
+    return out
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")  # cp1252 crashea con Δ/→
     raise SystemExit("recompose.py: implementación en progreso (Task 11)")
