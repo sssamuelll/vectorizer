@@ -150,7 +150,10 @@ orquestador sea explícito).
 
 ### Superficie de import — declarada Y mecánica (Richter: "Python no tiene honor")
 
-- de `fontid.py`: **solo** `analyze_regions`.
+- de `fontid.py`: **solo** `analyze_regions`, `download_family_weights`, `CACHE_DIR_DEFAULT`.
+  *(Ampliada en plan-time 2026-06-07: la regla `--font` acepta cualquier familia GF
+  on-demand — §5 — y duplicar el pipeline de descarga violaría la ley Halcyon.
+  Esta edición es el procedimiento de ampliación funcionando como se diseñó.)*
 - de `vectorize.py`: **solo** `load_image_bgr`, `trace_contours`, `extract_stroke_color`,
   `clean_binary_mask`.
 - **Enforcement mecánico**: un test unitario parsea el AST de `recompose.py` y falla si
