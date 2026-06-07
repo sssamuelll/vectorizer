@@ -312,10 +312,33 @@ def points_to_svg_path(points, rdp_eps=1.0, chaikin_iter=2, tension=0.5):
 # 6. AGUJEROS
 # ═══════════════════════════════════════════════════════════════════
 
-def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension):
-    """RDP + Chaikin + Catmull-Rom on a closed contour. Returns 'd' string without trailing Z."""
+def _gauss_filter_closed(pts, sigma):
+    """Filtro gaussiano CIRCULAR sobre los puntos de un contorno cerrado
+    (N,2). Mata el ruido de píxel antes del RDP sin deformar la forma.
+    Ganador del barrido de suavizado (calibración 2026-06-07, sigma=2).
+    sigma<=0 o contorno corto → passthrough."""
+    n = len(pts)
+    if n < 8 or sigma <= 0:
+        return pts
+    radius = max(1, int(3 * sigma))
+    xs = np.arange(-radius, radius + 1)
+    kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
+    kernel /= kernel.sum()
+    out = np.empty_like(pts, dtype=np.float64)
+    for d in range(2):
+        col = pts[:, d]
+        ext = np.concatenate([col[-radius:], col, col[:radius]])
+        out[:, d] = np.convolve(ext, kernel, mode="valid")
+    return out
+
+
+def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension, sigma=0.0):
+    """RDP + Chaikin + Catmull-Rom on a closed contour. Returns 'd' string without trailing Z.
+
+    sigma>0: gaussian point filter BEFORE RDP (see _gauss_filter_closed)."""
     if len(pts) < 4:
         return ""
+    pts = _gauss_filter_closed(np.asarray(pts, dtype=np.float64), sigma)
     simplified = rdp_simplify(pts.tolist(), epsilon=rdp_eps)
     if len(simplified) < 3:
         return ""
@@ -327,7 +350,7 @@ def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension):
 
 
 def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
-                   min_outer_area=8, min_hole_area=8):
+                   min_outer_area=8, min_hole_area=8, sigma=0.0):
     """Trace ink mask as filled outlines with holes.
 
     Returns a list of path-data strings; each string is one connected ink blob
@@ -354,7 +377,7 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
         if cv2.contourArea(contours[oi]) < min_outer_area:
             continue
         outer_pts = contours[oi].reshape(-1, 2).astype(np.float64)
-        d_outer = _smooth_closed_contour(outer_pts, rdp_eps, chaikin_iter, tension)
+        d_outer = _smooth_closed_contour(outer_pts, rdp_eps, chaikin_iter, tension, sigma)
         if not d_outer:
             continue
         d_parts = [d_outer + " Z"]
@@ -362,7 +385,7 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
             if cv2.contourArea(contours[hi]) < min_hole_area:
                 continue
             hole_pts = contours[hi].reshape(-1, 2).astype(np.float64)
-            d_hole = _smooth_closed_contour(hole_pts, rdp_eps, chaikin_iter, tension)
+            d_hole = _smooth_closed_contour(hole_pts, rdp_eps, chaikin_iter, tension, sigma)
             if d_hole:
                 d_parts.append(d_hole + " Z")
         paths.append(" ".join(d_parts))

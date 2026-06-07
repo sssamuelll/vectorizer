@@ -247,6 +247,63 @@ def test_inert_color_flag_warns_in_contour_mode(capsys):
     assert "--speckle" in capsys.readouterr().out
 
 
+# ═══════════════════════════════════════════════════════════════════
+# ── filtro sigma (Fase B: --contour-sigma) ──────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+
+def _circle_binary(noise_seed=None):
+    """Círculo binario 200x200; con seed, borde con ruido de ±1px."""
+    img = np.zeros((200, 200), np.uint8)
+    cv2.circle(img, (100, 100), 60, 255, -1)
+    if noise_seed is not None:
+        rng = np.random.default_rng(noise_seed)
+        contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_NONE)
+        for pt in contours[0].reshape(-1, 2)[::3]:
+            dx, dy = rng.integers(-1, 2, 2)
+            cv2.circle(img, (int(pt[0] + dx), int(pt[1] + dy)), 1, 255, -1)
+    return img
+
+
+def test_sigma_cero_output_identico():
+    """sigma=0 (default) debe producir EXACTAMENTE el output actual —
+    cero regresión para todos los llamadores existentes."""
+    binary = _circle_binary(noise_seed=7)
+    antes = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2)
+    despues = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2,
+                                       sigma=0.0)
+    assert antes == despues
+
+
+def test_sigma_reduce_vertices():
+    """sigma=2 sobre borde ruidoso produce paths con menos segmentos C
+    (el filtro mata el ruido de píxel antes del RDP)."""
+    binary = _circle_binary(noise_seed=7)
+    sin = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2)
+    con = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2,
+                                   sigma=2.0)
+    assert sum(d.count("C") for d in con) < sum(d.count("C") for d in sin)
+
+
+def test_sigma_es_determinista():
+    binary = _circle_binary(noise_seed=7)
+    a = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2, sigma=2.0)
+    b = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2, sigma=2.0)
+    assert a == b
+
+
+def test_gauss_filter_closed_preserva_forma():
+    """El filtro circular sobre un cuadrado no colapsa el contorno:
+    mismo número de puntos, centroide estable (<0.5px)."""
+    pts = np.array([[float(x), 0.0] for x in range(50)] +
+                   [[49.0, float(y)] for y in range(50)] +
+                   [[float(x), 49.0] for x in range(49, -1, -1)] +
+                   [[0.0, float(y)] for y in range(49, -1, -1)])
+    out = vz._gauss_filter_closed(pts, sigma=2.0)
+    assert out.shape == pts.shape
+    assert np.linalg.norm(out.mean(axis=0) - pts.mean(axis=0)) < 0.5
+
+
 def test_no_warning_when_flags_match_mode(capsys):
     args = vz.build_parser().parse_args(["x.png", "--mode", "color", "--speckle", "10"])
     vz.warn_inert_flags(args)
