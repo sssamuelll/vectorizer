@@ -57,8 +57,10 @@ introducir un cambio de contrato silencioso.
   `python vectorize.py imagen.png`. (Ver nota estructural al final de Fase 1: hay un trigger
   de revisión registrado si Fase 2 empuja el archivo mucho más allá de ~1000 líneas.)
 - GUI o servicio web.
-- Tratamiento **híbrido** de imágenes mixtas (ej. nota manuscrita con un logo a color en la
-  misma imagen): un solo pipeline procesa toda la imagen. Fuera de alcance de ambas fases.
+- Tratamiento **híbrido** de imágenes mixtas **dentro de `vectorize.py`**: un solo pipeline
+  procesa toda la imagen. *(Reescrito 2026-06-07: el no-goal absoluto se levantó
+  conscientemente para `recompose.py` — Fase B del spec de fuentes, alcance una tinta.
+  `vectorize.py` por sí solo sigue sin tratamiento híbrido. Ver "Decisión cross-spec".)*
 
 ## Dependencias y hechos runtime verificados
 
@@ -250,16 +252,29 @@ diseño.
 > el logo se aplasta a una máscara binaria. Esto está **fuera de alcance de ambas fases** y
 > se documenta como limitación conocida, no como bug.
 
-**Nota cross-spec (decisión pendiente).** La **Fase B** del spec de aproximación de fuentes
-(`docs/superpowers/specs/2026-06-05-font-identification-design.md`) —recomposición de texto
-desde un archivo de fuente fusionado con el resto vectorizado— **es** tratamiento híbrido de
-imagen mixta, y por tanto **propone levantar este no-goal**. La junta del 2026-06-05 lo
-identificó como *"una contradicción con dos membretes"* (Voronov): un mismo tratamiento
-declarado fuera de alcance aquí y planificado allá. La decisión de levantar este no-goal está
-**pendiente** y se tomará de forma **explícita y documentada en AMBOS documentos**, no por
-inercia ni como hecho consumado — ver las **condiciones de Fase B** de ese spec (en
-particular, su Condición 2 exige exactamente esta resolución cross-spec antes de diseñar la
-recomposición).
+**Decisión cross-spec (RESUELTA 2026-06-07).** La **Fase B** del spec de aproximación de
+fuentes —recomposición de texto desde un archivo de fuente fusionado con el resto
+vectorizado— **es** tratamiento híbrido de imagen mixta. La junta del 2026-06-05 lo
+identificó como *"una contradicción con dos membretes"* (Voronov). El no-goal **se levanta
+conscientemente** con tres acotaciones, decididas por Samuel y documentadas en el spec de
+Fase B (`2026-06-07-fontid-fase-b-design.md`, §3):
+
+1. El tratamiento híbrido vive **solo en `recompose.py`**. `vectorize.py` por sí solo sigue
+   procesando toda la imagen con un único pipeline — su limitación se mantiene.
+2. Alcance: **logos de una tinta**. Mixtas multicolor siguen fuera (B.x).
+3. **El tercer clasificador queda nombrado**: decidir qué región se recompone y cuál se
+   vectoriza es la misma pregunta que responde el router diferido de Fase 2 y que
+   `classify_region` de fontid. Árbitro declarado de la costura en recompose.py:
+   `classify_region` (type ∧ score ≥ 0.65). **Cuando el router de Fase 2 exista, este punto
+   es el único lugar a reconciliar** — tres clasificadores respondiendo la misma pregunta
+   sin árbitro divergen en silencio.
+
+**Superficie de API declarada** (cerrada; ampliarla exige editar este spec): `recompose.py`
+puede importar de `vectorize.py` **solo** `load_image_bgr`, `trace_contours`,
+`extract_stroke_color`, `clean_binary_mask`. Además `vectorize.py` gana el flag
+`--contour-sigma` (filtro gaussiano circular de puntos de contorno antes del RDP, default 0
+= comportamiento actual sin cambio; ganador del barrido de suavizado de calibración del
+2026-06-07).
 
 ## Modo directorio: resumen al final (comportamiento nuevo)
 

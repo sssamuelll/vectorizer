@@ -427,6 +427,10 @@ en el camino feliz, **más** los grupos que el roast exigió:
 
 # Fase B — Recomposición (condicionada, NO meramente diferida)
 
+> **Estado 2026-06-07: las tres condiciones se resolvieron y Fase B tiene spec propio**
+> (`2026-06-07-fontid-fase-b-design.md`). Esta sección se conserva como registro de las
+> condiciones originales; las resoluciones se anotan en línea.
+
 Recomposición: tomar el match ganador, extraer outlines de glifos del TTF
 (`fontTools` → SVG paths), posicionarlos según las bboxes replicando el tracking medido, y
 fusionar con la salida vectorizada del resto de la imagen (vía `vectorize.py`) en un SVG
@@ -437,6 +441,9 @@ híbrido.
 
 **Condición 1 — Evidencia real.** Gate del spike superado **+** Fase A funcionando con
 evidencia real (no sintética).
+*✅ Resuelta 2026-06-07: gate superado, Fase A aceptada por Samuel con el logo real, y
+prototipo manual de recomposición completo y verificado
+(`docs/calibration/2026-06-05-logo-libre-mente.md`).*
 
 **Condición 2 — Resolución de la contradicción cross-spec.** El spec del vectorizador declara
 las **imágenes mixtas fuera de alcance**, y la recomposición **ES** tratamiento híbrido de
@@ -444,6 +451,10 @@ imagen mixta (texto recompuesto desde fuente + resto vectorizado en el mismo SVG
 en palabras de Voronov, *"una contradicción con dos membretes"*. **Levantar ese no-goal será
 una decisión consciente y documentada en AMBOS specs** — no un hecho consumado por la puerta
 de atrás. Mientras no se levante explícitamente, Fase B no se diseña.
+*✅ Resuelta 2026-06-07: no-goal levantado conscientemente en el spec del vectorizador
+(sección "Decisión cross-spec") con tres acotaciones — vive solo en `recompose.py`, alcance
+una tinta, y el tercer clasificador (la costura) queda nombrado con `classify_region` como
+árbitro declarado. Detalle en `2026-06-07-fontid-fase-b-design.md` §3.*
 
 **Condición 3 — El contrato de información se define ANTES de congelar el JSON de Fase A.**
 
@@ -465,6 +476,16 @@ Como mínimo, Fase B necesitará **por glifo**:
 **Hasta que Fase B firme sus requisitos**, el `--json` de Fase A se denomina **"emisión
 draft"**, no contrato. El nombre es deliberado: avisa a cualquier consumidor de que la
 estructura aún puede cambiar cuando Fase B firme.
+
+*✅ Resuelta 2026-06-07 — Fase B firmó.* El contrato tiene **una sola fuente de forma**
+(hallazgo de Voronov + ley Halcyon: dos representaciones de la misma política divergen):
+la dataclass `RegionAnalysis` en fontid.py, expuesta vía `analyze_regions(img)`, desde la
+cual se serializa el `--json` **v1** (campo `"contract": 1`). Campos firmados: `bbox`,
+`text`, `classification`+score, `glyph_boxes` absolutos (cubren el requisito de baseline:
+conservan la posición vertical real), `ranking` [(family, wght, score, tie)],
+`scale_factor`. `opsz` queda como campo **reservado** (nullable, no implementado en B —
+el prototipo alcanzó registro 0.0px sin él). Detalle en `2026-06-07-fontid-fase-b-design.md`
+§3-4.
 
 ## Riesgos conocidos (resueltos o vivos)
 
