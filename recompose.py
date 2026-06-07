@@ -236,6 +236,69 @@ def compose_svg(w, h, ink, callig_paths, glyph_pairs):
     return ET.tostring(svg, encoding="unicode")
 
 
+def _render_svg(svg_text):
+    """Render BGR del SVG vía resvg_py, o None si no está instalado.
+    resvg_py es dependencia OPCIONAL (solo preview)."""
+    try:
+        import resvg_py
+    except ImportError:
+        return None
+    png = bytes(resvg_py.svg_to_bytes(svg_string=svg_text))
+    arr = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_UNCHANGED)
+    if arr is None:
+        return None
+    if arr.shape[2] == 4:
+        a = arr[:, :, 3:4].astype(np.float32) / 255.0
+        arr = (arr[:, :, :3].astype(np.float32) * a
+               + 255.0 * (1 - a)).astype(np.uint8)
+    return arr
+
+
+def write_preview(orig_bgr, svg_text, region_boxes, out_path):
+    """Preview = original | render (el original SIEMPRE presente como
+    ancla — Iris: sin él es '¿cuál te gusta?' en vez de '¿cuál calza?'),
+    más una banda de zoom por región recompuesta. None sin resvg."""
+    render = _render_svg(svg_text)
+    if render is None:
+        print("  [WARN] resvg_py no disponible — preview omitido "
+              "(pip install resvg_py)", file=sys.stderr)
+        return None
+    if render.shape[:2] != orig_bgr.shape[:2]:
+        render = cv2.resize(render, (orig_bgr.shape[1], orig_bgr.shape[0]),
+                            interpolation=cv2.INTER_AREA)
+    sep_v = np.zeros((orig_bgr.shape[0], 4, 3), np.uint8)
+    rows = [np.hstack([orig_bgr, sep_v, render])]
+    for x0, y0, x1, y1 in region_boxes:
+        a, b = orig_bgr[y0:y1, x0:x1], render[y0:y1, x0:x1]
+        sep = np.zeros((a.shape[0], 4, 3), np.uint8)
+        band = np.hstack([a, sep, b])
+        scale = rows[0].shape[1] / band.shape[1]
+        band = cv2.resize(band, (rows[0].shape[1],
+                                 max(1, int(band.shape[0] * scale))),
+                          interpolation=cv2.INTER_AREA if scale < 1
+                          else cv2.INTER_CUBIC)
+        rows.append(np.zeros((6, rows[0].shape[1], 3), np.uint8))
+        rows.append(band)
+    out_path = Path(out_path)
+    cv2.imwrite(str(out_path), np.vstack(rows))
+    return out_path
+
+
+def print_correction_commands(input_path, regions, choices):
+    """Eco sintáctico de una decisión visual (Iris: la superficie es el
+    PNG; el comando es la sintaxis). Por región recompuesta: la usada +
+    las 3 siguientes del ranking como re-corridas armadas."""
+    print("\nCorrección (mira el preview; estas son las re-corridas):")
+    for idx, (family, wght) in sorted(choices.items()):
+        r = regions[idx]
+        print(f"  [{idx + 1}] \"{r.text}\" — usada: {family} {wght}")
+        alternativas = [e for e in r.ranking
+                        if (e.family, e.wght) != (family, wght)][:3]
+        for e in alternativas:
+            print(f'      python recompose.py "{input_path}" '
+                  f'--font "{r.text}={e.family}:{e.wght}"')
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")  # cp1252 crashea con Δ/→
     raise SystemExit("recompose.py: implementación en progreso (Task 11)")

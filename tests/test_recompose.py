@@ -195,3 +195,42 @@ def test_compose_svg_estructura():
               if g.tag.endswith("g")]
     assert "ink" in grupos and "type" in grupos
     assert "ns0" not in svg_text        # ley del repo: sin pollution
+
+
+# ── preview + comandos de corrección (spec §6) ──────────────────────
+
+def test_correction_commands_eco_de_la_decision(capsys):
+    r = _region(text="mente", classification="type", ranking=_rank(
+        ("Nanum Myeongjo", 400, 0.76, False), ("Cormorant Garamond", 500, 0.75, True),
+        ("Libre Baskerville", 400, 0.74, True), ("Lora", 400, 0.66, False),
+        ("PT Serif", 400, 0.65, False)))
+    recompose.print_correction_commands(
+        "logo.jpeg", [r], {0: ("Nanum Myeongjo", 400)})
+    out = capsys.readouterr().out
+    assert 'usada: Nanum Myeongjo 400' in out
+    # las 3 siguientes del ranking como alternativas, comando armado
+    assert '--font "mente=Cormorant Garamond:500"' in out
+    assert '--font "mente=Libre Baskerville:400"' in out
+    assert '--font "mente=Lora:400"' in out
+    assert "PT Serif" not in out
+
+
+def test_write_preview_sin_resvg_no_revienta(tmp_path, monkeypatch):
+    """resvg_py es opcional: sin él, el preview se omite con aviso y la
+    función devuelve None (el SVG es el entregable; el preview es la
+    superficie de juicio)."""
+    monkeypatch.setattr(recompose, "_render_svg", lambda svg: None)
+    img = _logo_sintetico()
+    out = recompose.write_preview(img, "<svg/>", [], tmp_path / "p.png")
+    assert out is None and not (tmp_path / "p.png").exists()
+
+
+def test_write_preview_con_render(tmp_path, monkeypatch):
+    img = _logo_sintetico()
+    monkeypatch.setattr(recompose, "_render_svg",
+                        lambda svg: np.full_like(img, 255))
+    out = recompose.write_preview(img, "<svg/>", [(50, 60, 250, 115)],
+                                  tmp_path / "p.png")
+    assert out is not None and out.exists()
+    loaded = cv2.imread(str(out))
+    assert loaded.shape[1] > img.shape[1]     # lado a lado: más ancho
