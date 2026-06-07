@@ -185,6 +185,57 @@ def resolve_ttf(family, wght, cache_dir):
         f"peso {wght} no disponible para {family!r}; disponibles: {disponibles}")
 
 
+def calligraphy_paths(img_bgr, mask_boxes, sigma, pad=MASK_PAD):
+    """Vectoriza la tinta FUERA de las regiones a recomponer.
+
+    mask_boxes: bboxes absolutas de las regiones recompuestas (se pintan
+    de blanco con pad). clean_binary_mask es legítima AQUÍ (caligrafía) —
+    y JAMÁS sobre crops de glifos (contradicción cross-spec resuelta,
+    spec §4)."""
+    h, w = img_bgr.shape[:2]
+    masked = img_bgr.copy()
+    for x0, y0, x1, y1 in mask_boxes:
+        masked[max(0, y0 - pad):min(h, y1 + pad),
+               max(0, x0 - pad):min(w, x1 + pad)] = 255
+    gray = cv2.cvtColor(masked, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(gray, 0, 255,
+                              cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE,
+                              np.ones((2, 2), np.uint8), iterations=1)
+    binary = clean_binary_mask(binary)
+    return trace_contours(binary, rdp_eps=CALLIG_RDP,
+                          chaikin_iter=CALLIG_CHAIKIN,
+                          tension=CALLIG_TENSION, sigma=sigma)
+
+
+def binary_ink_mask(img_bgr):
+    """Máscara binaria de la tinta completa (para extract_stroke_color)."""
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255,
+                              cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+    return binary
+
+
+def compose_svg(w, h, ink, callig_paths, glyph_pairs):
+    """SVG híbrido: grupo .ink (caligrafía) + grupo .type (texto TTF)."""
+    svg = ET.Element("svg", {
+        "xmlns": "http://www.w3.org/2000/svg", "version": "1.1",
+        "width": str(w), "height": str(h), "viewBox": f"0 0 {w} {h}",
+    })
+    defs = ET.SubElement(svg, "defs")
+    style = ET.SubElement(defs, "style")
+    style.text = (f".ink {{ fill: {ink}; fill-rule: evenodd; stroke: none; }} "
+                  f".type {{ fill: {ink}; stroke: none; }}")
+    g_ink = ET.SubElement(svg, "g", {"class": "ink"})
+    for d in callig_paths:
+        ET.SubElement(g_ink, "path", {"d": d})
+    g_type = ET.SubElement(svg, "g", {"class": "type"})
+    for d, tr in glyph_pairs:
+        ET.SubElement(g_type, "path", {"d": d, "transform": tr})
+    return ET.tostring(svg, encoding="unicode")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")  # cp1252 crashea con Δ/→
     raise SystemExit("recompose.py: implementación en progreso (Task 11)")

@@ -1,5 +1,6 @@
 """Tests de recompose.py (Fase B v0.1 — replay puro)."""
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -161,3 +162,36 @@ def test_resolve_ttf_peso_inexistente_error_duro(tmp_path, monkeypatch):
     with pytest.raises(recompose.FontKeyError) as e:
         recompose.resolve_ttf("Otra", 900, tmp_path)
     assert "900" in str(e.value) and "400" in str(e.value)
+
+
+# ── caligrafía + composición ────────────────────────────────────────
+
+def _logo_sintetico():
+    """120x300: un 'trazo caligráfico' (curva) arriba + una 'palabra'
+    (3 rectángulos) abajo."""
+    img = np.full((120, 300, 3), 255, np.uint8)
+    cv2.ellipse(img, (150, 30), (100, 15), 0, 0, 360, (60, 110, 90), 6)
+    for x in (60, 130, 200):
+        cv2.rectangle(img, (x, 70), (x + 40, 110), (60, 110, 90), -1)
+    return img
+
+
+def test_calligraphy_paths_excluye_regiones_enmascaradas():
+    img = _logo_sintetico()
+    todas = recompose.calligraphy_paths(img, [], sigma=2.0)
+    sin_palabra = recompose.calligraphy_paths(img, [(50, 60, 250, 115)],
+                                              sigma=2.0)
+    assert len(sin_palabra) < len(todas)
+    assert len(sin_palabra) >= 1
+
+
+def test_compose_svg_estructura():
+    callig = ["M 10 10 L 50 10 L 50 50 Z"]
+    glyphs = [("M 0 0 L 10 0 L 10 10 Z", "translate(5 5) scale(0.1 -0.1)")]
+    svg_text = recompose.compose_svg(300, 120, "#86b0a3", callig, glyphs)
+    root = ET.fromstring(svg_text)
+    assert root.get("viewBox") == "0 0 300 120"
+    grupos = [g.get("class") for g in root
+              if g.tag.endswith("g")]
+    assert "ink" in grupos and "type" in grupos
+    assert "ns0" not in svg_text        # ley del repo: sin pollution
