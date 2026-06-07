@@ -142,7 +142,7 @@ def glyph_transform(font_bbox, glyph_box, s):
     x0, y0, x1, y1 = glyph_box
     cx = (x0 + x1) / 2.0
     tx = cx - s * (xmin + xmax) / 2.0
-    ty = y1 - s * ymin
+    ty = y1 + s * ymin
     return f"translate({tx:.2f} {ty:.2f}) scale({s:.5f} -{s:.5f})"
 
 

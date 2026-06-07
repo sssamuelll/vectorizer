@@ -120,7 +120,7 @@ def test_glyph_transform_alinea_centro_y_fondo():
     # bbox renderizado: x ∈ [tx+s*xmin, tx+s*xmax], y_bottom = ty - s*ymin
     cx_render = tx + s * (fb[0] + fb[2]) / 2.0
     assert abs(cx_render - (gb[0] + gb[2]) / 2.0) < 1e-6
-    assert abs((ty + s * fb[1]) - gb[3]) < 1e-6
+    assert abs((ty - s * fb[1]) - gb[3]) < 1e-6
 
 
 CACHE = Path.home() / ".cache" / "vectorizer-fonts"
