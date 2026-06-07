@@ -122,7 +122,6 @@ class RegionAnalysis:
     class_score: float
     glyph_boxes: list[tuple[int, int, int, int]]  # absolutas (baseline real conservada)
     ranking: list[RankEntry]                  # (family, wght, score, tie) — vacío si class != type
-    scale_factor: float                       # mediana alturas crop/render del matching
 
 def analyze_regions(img_bgr) -> list[RegionAnalysis]
 ```
@@ -130,10 +129,11 @@ def analyze_regions(img_bgr) -> list[RegionAnalysis]
 Envuelve la tubería existente (`detect_regions` → `segment_glyphs_with_boxes` →
 `classify_region` → `rank_families`); **las funciones actuales no se deprecan ni
 cambian de firma** — siguen siendo la API de los tests y del CLI de fontid;
-`analyze_regions` es una fachada de composición. La nota de Null Vale sobre
-`scale_factor` queda registrada: su semántica está atada al pipeline de segmentación
-de una tinta; si B.x lo cambia, el campo NO puede conservar el nombre con otro
-significado (deuda anotada, no resuelta).
+`analyze_regions` es una fachada de composición.
+
+> **Nota (scale_factor retirado 2026-06-07, junta):** campo sin consumidor — recompose
+> calcula su propia escala desde los bboxes; el centinela 0.0 colisionaba con un scale
+> real. Si B.x lo necesita, lo recupera de `rank_families` con semántica definida.
 
 ### `--contour-sigma` — punto de inyección exacto (BLOCKER 2 de Serrano)
 
@@ -150,9 +150,12 @@ orquestador sea explícito).
 
 ### Superficie de import — declarada Y mecánica (Richter: "Python no tiene honor")
 
-- de `fontid.py`: **solo** `analyze_regions`.
+- de `fontid.py`: **solo** `analyze_regions`, `download_family_weights`, `CACHE_DIR_DEFAULT`.
+  *(Ampliada en plan-time 2026-06-07: la regla `--font` acepta cualquier familia GF
+  on-demand — §5 — y duplicar el pipeline de descarga violaría la ley Halcyon.
+  Esta edición es el procedimiento de ampliación funcionando como se diseñó.)*
 - de `vectorize.py`: **solo** `load_image_bgr`, `trace_contours`, `extract_stroke_color`,
-  `clean_binary_mask`.
+  `clean_binary_mask`, `count_effective_colors` *(ampliada plan-time HF4: aviso multicolor §7)*.
 - **Enforcement mecánico**: un test unitario parsea el AST de `recompose.py` y falla si
   los imports exceden la allowlist. La frontera la cierra el CI, no la prosa.
 - **`clean_binary_mask` — contradicción cross-spec resuelta** (Null Vale/Richter): el
@@ -172,7 +175,11 @@ python recompose.py logo.jpeg [-o out.svg]
                                 # empate (Δ<0.03) — sin chooser, el replay exige la
                                 # decisión explícita; sin empate, el líder es default
   --contour-sigma F             # suavizado de caligrafía (default 2.0)
-  --category / --pool / --api   # passthrough a fontid (pool de candidatas)
+  --category / --pool           # passthrough a fontid (pool de candidatas)
+                                # (--api NO entra en v0.1: la fachada analyze_regions
+                                #  no soporta nominaciones API — diferido; fontid.py
+                                #  como CLI las sigue soportando. Hallazgo del review
+                                #  de implementación, 2026-06-07.)
 ```
 
 ### Reglas de la clave `--font` (hallazgo 5 de Serrano — determinismo)
@@ -336,6 +343,41 @@ distinta de la regresión de costura; canal formal para "el ojo eligió fuera de
 | la máquina confiada-y-equivocada (caso 'e') | preview + comandos SIEMPRE; resolución plena (overlay, chooser) en B.2 |
 | replay ciego a regresión de juicio | nombrado como deuda B.2; replay etiquetado "regresión de costura" |
 | 0.65 con evidencia N=1 | declarado provisional con deuda de calibración; costura siempre reportada |
-| `scale_factor` cambia de semántica si B.x cambia la segmentación | anotado en §4; el nombre no sobrevive a un cambio de referente |
+| `scale_factor` (retirado 2026-06-07) | campo sin consumidor — recompose calcula su propia escala desde los bboxes; centinela 0.0 colisionaba con scale real; si B.x lo necesita, lo recupera de `rank_families` con semántica definida |
 | TTFs upstream sin pin | determinismo definido "dado el mismo caché" + sha256 en provenance |
 | el corte de Stride esconde una necesidad real del chooser | si una corrida real con empate duele lo suficiente, B.2 sube de prioridad con esa evidencia |
+
+## 13. Junta de implementación (2026-06-07) — hallazgos y disposición
+
+Tras implementar v0.1, el roster (Vex Rune, Halberg, Serrano, Null Vale, Iris Tane,
+Richter, Stride) revisó el CÓDIGO real + la corrida de aceptación. Veredicto de Stride:
+SHIP (cero blockers duros, aceptación 0 px). El racimo convergente y barato se **arregló
+antes del PR** (cinco commits, verificados a mano end-to-end):
+
+| arreglo | sillas | commit |
+|---|---|---|
+| `--font` recompone offline (desacopla la costura del ranking — la soberanía no depende de la red) | Halberg/Null Vale/Serrano | `f2a5687` |
+| `FontKeyError` limpio: glifo ausente del cmap / cmap None / TTF corrupto en caché (antes: traceback crudo post-descarga) | Halberg (verif. en vivo)/Serrano/Richter | `e2e17ac` |
+| cortar `scale_factor` (campo muerto + bug de centinela 0.0) | Vex/Null Vale/Serrano | `9e3e6d4` |
+| sanitizar clave de caché desde `--font` (path-traversal latente) | Richter/Serrano | `6aa7f1a` |
+| aviso multicolor §7 (la precondición "una tinta" no se verificaba) | Serrano | `95d1a2d` |
+
+**Deuda B.x registrada** (NO bloquea v0.1; pulido o cambia el artefacto aceptado):
+
+- **Preview (Iris):** el lado-a-lado gasta 72% en margen; las dos regiones se pegan sin
+  canal y leen como un string corrupto; falta banda de zoom para la caligrafía "libre"
+  (el elemento en riesgo); los glifos del zoom se recortan. Mejoras de composición, no
+  de fidelidad — el SVG ya pasa a 0 px.
+- **Dieta del path `.ink` (Iris):** el contorno emite ~1 ancla por píxel (81 KB). Es
+  **idéntico al prototipo aceptado** (por eso el XOR da 0); decimar (Douglas-Peucker
+  sobre la lista de puntos, no solo el sigma gaussiano) cambiaría el artefacto de
+  referencia — va a B.x con su propia re-aceptación.
+- **Contrato de forma única (Richter):** `build_json_draft` (Fase A) recomputa
+  `tie_flags` por su cuenta sobre dicts crudos en vez de leer `RegionAnalysis`. Hoy no
+  muerde (el `--json` está diferido y recompose no lo toca), pero el comentario "ley
+  Halcyon" sobre-promete hasta que B.2 haga a `RegionAnalysis` la única fuente que
+  `build_json_draft` lee.
+- **Determinismo del ranking (Null Vale/Halberg):** `download_family_weights` golpea GF
+  antes de mirar el disco, así que el *ranking automático* necesita red aunque el caché
+  esté caliente. El replay con `--font` explícito ya NO depende de esto (arreglo
+  `f2a5687`); el camino del default sí. Documentado, no arreglado en v0.1.

@@ -442,6 +442,101 @@ def test_cli_manual_mode_still_works():
     fi.validate_args(args)   # no SystemExit
 
 
+# ── analyze_regions (fachada / contrato Fase B) ─────────────────────
+
+def _img_dos_palabras():
+    """Imagen sintética 400x200 con dos 'palabras' de rectángulos."""
+    img = np.full((200, 400, 3), 255, np.uint8)
+    for x in (30, 70, 110):                      # región 1: 3 glifos
+        cv2.rectangle(img, (x, 40), (x + 25, 90), (20, 20, 20), -1)
+    for x in (30, 70):                           # región 2: 2 glifos
+        cv2.rectangle(img, (x, 130), (x + 25, 180), (20, 20, 20), -1)
+    return img
+
+
+def test_analyze_regions_compone_la_tuberia(monkeypatch):
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (20, 30, 150, 100), "text": "abc", "word_boxes": []},
+        {"bbox": (20, 120, 110, 190), "text": "xy", "word_boxes": []},
+    ])
+    monkeypatch.setattr(fi, "classify_region",
+                        lambda g, t, boxes=None: {"label": "type", "score": 0.9})
+    monkeypatch.setattr(fi, "fetch_metadata", lambda cd: [])
+    monkeypatch.setattr(fi, "build_pool", lambda m, pool_size, category: ["Fam A"])
+    monkeypatch.setattr(fi, "prepare_pool_weights",
+                        lambda fams, cd: {"Fam A": [(400, "fake.ttf")]})
+    monkeypatch.setattr(fi, "rank_families", lambda g, c, fw, a: [
+        {"family": "Fam A", "overlap": 0.8, "wght": 400, "scale": 0.15, "api": False},
+        {"family": "Fam B", "overlap": 0.79, "wght": 500, "scale": 0.15, "api": False},
+    ])
+    out = fi.analyze_regions(img)
+    assert len(out) == 2
+    r1 = out[0]
+    assert isinstance(r1, fi.RegionAnalysis)
+    assert r1.text == "abc" and r1.classification == "type"
+    assert r1.class_score == 0.9
+    assert len(r1.glyph_boxes) == 3
+    assert all(b[0] >= 20 and b[1] >= 30 for b in r1.glyph_boxes)  # ABSOLUTAS
+    assert r1.ranking[0].family == "Fam A" and r1.ranking[0].wght == 400
+    assert r1.ranking[1].tie is True          # Δ=0.01 < TIE_DELTA 0.03
+
+
+def test_analyze_regions_handwriting_sin_ranking(monkeypatch):
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (20, 30, 150, 100), "text": "abc", "word_boxes": []}])
+    monkeypatch.setattr(fi, "classify_region",
+                        lambda g, t, boxes=None: {"label": "handwriting",
+                                                  "score": 0.3})
+    llamado = []
+    monkeypatch.setattr(fi, "fetch_metadata",
+                        lambda cd: llamado.append(1) or [])
+    out = fi.analyze_regions(img)
+    assert out[0].ranking == []
+    assert not llamado          # sin región type NO se toca la red
+
+
+def test_analyze_regions_conteo_desigual_sin_ranking(monkeypatch):
+    """3 glifos pero texto de 4 chars → type sin ranking (no se adivina)."""
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (20, 30, 150, 100), "text": "abcd", "word_boxes": []}])
+    monkeypatch.setattr(fi, "classify_region",
+                        lambda g, t, boxes=None: {"label": "type", "score": 0.9})
+    monkeypatch.setattr(fi, "fetch_metadata", lambda cd: [])
+    monkeypatch.setattr(fi, "build_pool", lambda m, pool_size, category: [])
+    monkeypatch.setattr(fi, "prepare_pool_weights", lambda fams, cd: {})
+    out = fi.analyze_regions(img)
+    assert out[0].classification == "type" and out[0].ranking == []
+
+
+def test_analyze_regions_uncertain_sin_ranking(monkeypatch):
+    """uncertain NO se rankea en la fachada (divergencia deliberada con
+    main(), que sí lo muestra al humano): la costura solo recompone type."""
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (20, 30, 150, 100), "text": "abc", "word_boxes": []}])
+    monkeypatch.setattr(fi, "classify_region",
+                        lambda g, t, boxes=None: {"label": "uncertain",
+                                                  "score": 0.5})
+    llamado = []
+    monkeypatch.setattr(fi, "fetch_metadata",
+                        lambda cd: llamado.append(1) or [])
+    out = fi.analyze_regions(img)
+    assert out[0].classification == "uncertain" and out[0].ranking == []
+    assert not llamado
+
+
+def test_analyze_regions_region_degenerada_se_omite(monkeypatch, capsys):
+    img = _img_dos_palabras()
+    monkeypatch.setattr(fi, "detect_regions", lambda im: [
+        {"bbox": (50, 30, 50, 100), "text": "x", "word_boxes": []}])
+    out = fi.analyze_regions(img)
+    assert out == []
+    assert "degenerada" in capsys.readouterr().err
+
+
 def test_main_guard_is_last_statement():
     """El guard __main__ debe ser el ÚLTIMO statement del módulo — si queda
     arriba de funciones, el flujo auto muere con NameError al correr como

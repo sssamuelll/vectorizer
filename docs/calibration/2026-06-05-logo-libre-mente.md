@@ -292,3 +292,33 @@ fue juicio humano: elegir QUÉ regiones recomponer y con qué familia/peso (aqu�
 líderes de la corrida de aceptación, elegidos visualmente por Samuel/preview).
 Scripts del prototipo: `docs/calibration/scripts/` (paths de usuario hardcodeados —
 son evidencia de calibración, no producto).
+
+## Fase B v0.1 — corrida de aceptación (2026-06-07)
+
+El producto (`recompose.py`, replay puro) contra el prototipo manual, spec §9.1:
+
+```
+python recompose.py logo_ale.jpeg -o logo_ale_v01.svg
+  --font "mente=Nanum Myeongjo:400"
+  --font "INTEGRATIVE PSYCHOLOGY=STIX Two Text:600"
+  --contour-sigma 2 --category serif
+```
+
+**Costura reportada:** "mente" → recompone (type 0.95); "INTEGRATIVE PSYCHOLOGY" →
+recompone (type 0.87); "libre" ausente del OCR (límite documentado). 5 contornos de
+caligrafía + 26 glifos. Preview y comandos de corrección emitidos (las alternativas
+del ranking serif real por región: Cormorant Garamond 500, Libre Baskerville 400, …).
+
+**XOR producto-vs-prototipo** (render contra render, tolerancia 2px):
+**0 clusters ≥30px, 0 píxeles en disputa.** El criterio era "cero clusters";
+el resultado fue indistinguibilidad total — la astilla de la 'm' se canceló
+como el spec predijo (mismas fuentes, mismo sigma).
+
+**Registro por glifo contra el original:** mediana ratio de altura 1.000,
+Δcentro-x +0.0px, Δbaseline +0.0px en ambas regiones — idéntico al prototipo.
+
+**Nota honesta del spec §9:** esto valida costura, compositor y contrato (el
+reproductor de decisiones humanas reproduce). La validación del *juicio*
+(sesión/chooser) es la aceptación de B.2, con su propia evidencia.
+
+Pendiente: juicio de aceptación de Samuel sobre la corrida.

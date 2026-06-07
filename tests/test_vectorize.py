@@ -247,6 +247,70 @@ def test_inert_color_flag_warns_in_contour_mode(capsys):
     assert "--speckle" in capsys.readouterr().out
 
 
+# ═══════════════════════════════════════════════════════════════════
+# ── filtro sigma (Fase B: --contour-sigma) ──────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+
+def _circle_binary(noise_seed=None):
+    """Círculo binario 200x200; con seed, borde con ruido de ±1px."""
+    img = np.zeros((200, 200), np.uint8)
+    cv2.circle(img, (100, 100), 60, 255, -1)
+    if noise_seed is not None:
+        rng = np.random.default_rng(noise_seed)
+        contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL,
+                                       cv2.CHAIN_APPROX_NONE)
+        for pt in contours[0].reshape(-1, 2)[::3]:
+            dx, dy = rng.integers(-1, 2, 2)
+            cv2.circle(img, (int(pt[0] + dx), int(pt[1] + dy)), 1, 255, -1)
+    return img
+
+
+def test_sigma_cero_output_identico():
+    """default y sigma=0.0 explícito toman el mismo passthrough — la firma
+    nueva no altera a los llamadores existentes."""
+    binary = _circle_binary(noise_seed=7)
+    antes = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2)
+    despues = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2,
+                                       sigma=0.0)
+    assert antes == despues
+
+
+def test_sigma_reduce_vertices():
+    """sigma=2 sobre borde ruidoso produce paths con menos segmentos C
+    (el filtro mata el ruido de píxel antes del RDP)."""
+    binary = _circle_binary(noise_seed=7)
+    sin = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2)
+    con = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2,
+                                   sigma=2.0)
+    assert sum(d.count("C") for d in con) < sum(d.count("C") for d in sin)
+
+
+def test_sigma_es_determinista():
+    binary = _circle_binary(noise_seed=7)
+    a = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2, sigma=2.0)
+    b = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2, sigma=2.0)
+    assert a == b
+
+
+def test_gauss_filter_closed_preserva_forma():
+    """El filtro circular sobre un cuadrado no colapsa el contorno:
+    mismo número de puntos, centroide estable (<0.5px)."""
+    pts = np.array([[float(x), 0.0] for x in range(50)] +
+                   [[49.0, float(y)] for y in range(50)] +
+                   [[float(x), 49.0] for x in range(49, -1, -1)] +
+                   [[0.0, float(y)] for y in range(49, -1, -1)])
+    out = vz._gauss_filter_closed(pts, sigma=2.0)
+    assert out.shape == pts.shape
+    assert np.linalg.norm(out.mean(axis=0) - pts.mean(axis=0)) < 0.5
+
+
+def test_gauss_filter_contorno_corto_passthrough():
+    """Contorno con 8<=n<=3*sigma NO crashea: passthrough (radius >= n)."""
+    pts = np.arange(16, dtype=np.float64).reshape(8, 2)
+    out = vz._gauss_filter_closed(pts, sigma=3.0)
+    assert np.array_equal(out, pts)
+
+
 def test_no_warning_when_flags_match_mode(capsys):
     args = vz.build_parser().parse_args(["x.png", "--mode", "color", "--speckle", "10"])
     vz.warn_inert_flags(args)
@@ -269,3 +333,31 @@ def test_batch_continues_after_corrupt_file(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "1 OK" in out
     assert "1 fallos" in out
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ── CLI: --contour-sigma (Task 3) ──────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+
+def test_cli_contour_sigma_default_cero():
+    args = vz.build_parser().parse_args(["x.png"])
+    assert args.contour_sigma == 0.0
+
+
+def test_contour_sigma_inerte_en_modo_color(capsys):
+    args = vz.build_parser().parse_args(
+        ["x.png", "--mode", "color", "--contour-sigma", "2"])
+    vz.warn_inert_flags(args)
+    assert "--contour-sigma no aplica" in capsys.readouterr().out
+
+
+def test_vectorize_acepta_contour_sigma(tmp_path):
+    """vectorize() acepta contour_sigma y produce SVG válido."""
+    img = np.full((120, 120, 3), 255, np.uint8)
+    cv2.circle(img, (60, 60), 35, (40, 40, 40), -1)
+    src = tmp_path / "in.png"
+    cv2.imwrite(str(src), img)
+    out = vz.vectorize(str(src), output_path=str(tmp_path / "o.svg"),
+                       contour_sigma=2.0)
+    root = ET.parse(out).getroot()
+    assert root.tag.endswith("svg")

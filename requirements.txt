@@ -11,3 +11,5 @@ pytest>=8
 winocr
 # anthropic: SOLO para fontid --api (nominación opt-in). Opcional.
 anthropic
+fonttools>=4.60          # recompose.py: outlines de glifos desde TTF
+# resvg_py — OPCIONAL: solo el preview de recompose.py (pip install resvg_py)

@@ -312,10 +312,33 @@ def points_to_svg_path(points, rdp_eps=1.0, chaikin_iter=2, tension=0.5):
 # 6. AGUJEROS
 # ═══════════════════════════════════════════════════════════════════
 
-def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension):
-    """RDP + Chaikin + Catmull-Rom on a closed contour. Returns 'd' string without trailing Z."""
+def _gauss_filter_closed(pts, sigma):
+    """Filtro gaussiano CIRCULAR sobre los puntos de un contorno cerrado
+    (N,2). Mata el ruido de píxel antes del RDP sin deformar la forma.
+    Ganador del barrido de suavizado (calibración 2026-06-07, sigma=2).
+    sigma<=0 o contorno corto → passthrough."""
+    n = len(pts)
+    radius = max(1, int(3 * sigma)) if sigma > 0 else 0
+    if n < 8 or sigma <= 0 or radius >= n:
+        return pts
+    xs = np.arange(-radius, radius + 1)
+    kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
+    kernel /= kernel.sum()
+    out = np.empty_like(pts, dtype=np.float64)
+    for d in range(2):
+        col = pts[:, d]
+        ext = np.concatenate([col[-radius:], col, col[:radius]])
+        out[:, d] = np.convolve(ext, kernel, mode="valid")
+    return out
+
+
+def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension, sigma=0.0):
+    """RDP + Chaikin + Catmull-Rom on a closed contour. Returns 'd' string without trailing Z.
+
+    sigma>0: gaussian point filter BEFORE RDP (see _gauss_filter_closed)."""
     if len(pts) < 4:
         return ""
+    pts = _gauss_filter_closed(np.asarray(pts, dtype=np.float64), sigma)
     simplified = rdp_simplify(pts.tolist(), epsilon=rdp_eps)
     if len(simplified) < 3:
         return ""
@@ -327,7 +350,7 @@ def _smooth_closed_contour(pts, rdp_eps, chaikin_iter, tension):
 
 
 def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
-                   min_outer_area=8, min_hole_area=8):
+                   min_outer_area=8, min_hole_area=8, sigma=0.0):
     """Trace ink mask as filled outlines with holes.
 
     Returns a list of path-data strings; each string is one connected ink blob
@@ -354,7 +377,7 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
         if cv2.contourArea(contours[oi]) < min_outer_area:
             continue
         outer_pts = contours[oi].reshape(-1, 2).astype(np.float64)
-        d_outer = _smooth_closed_contour(outer_pts, rdp_eps, chaikin_iter, tension)
+        d_outer = _smooth_closed_contour(outer_pts, rdp_eps, chaikin_iter, tension, sigma)
         if not d_outer:
             continue
         d_parts = [d_outer + " Z"]
@@ -362,7 +385,7 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
             if cv2.contourArea(contours[hi]) < min_hole_area:
                 continue
             hole_pts = contours[hi].reshape(-1, 2).astype(np.float64)
-            d_hole = _smooth_closed_contour(hole_pts, rdp_eps, chaikin_iter, tension)
+            d_hole = _smooth_closed_contour(hole_pts, rdp_eps, chaikin_iter, tension, sigma)
             if d_hole:
                 d_parts.append(d_hole + " Z")
         paths.append(" ".join(d_parts))
@@ -548,7 +571,8 @@ def vectorize(image_path, output_path=None,
               mode="contour",
               blur=3,
               rdp_epsilon=1.0, chaikin=2, tension=0.5,
-              stroke_width=2.0, auto_color=True, fallback_color="#1a1a1a"):
+              stroke_width=2.0, auto_color=True, fallback_color="#1a1a1a",
+              contour_sigma=0.0):
     """Vectorize a handwriting image to SVG.
 
     mode:
@@ -602,6 +626,7 @@ def vectorize(image_path, output_path=None,
             rdp_eps=max(0.5, rdp_epsilon * 0.75),
             chaikin_iter=max(1, chaikin - 1),
             tension=tension,
+            sigma=contour_sigma,
         )
     if mode in ("skeleton", "both"):
         skeleton_paths = _build_skeleton_paths(
@@ -667,6 +692,9 @@ def build_parser():
     parser.add_argument("--tension", type=float, default=0.5)
     parser.add_argument("--width", type=float, default=2.0,
                         help="Stroke width for skeleton mode")
+    parser.add_argument("--contour-sigma", type=float, default=0.0,
+                        help="Filtro gaussiano de puntos de contorno antes del "
+                             "RDP (0 = off; 2.0 = suavizado de calibración)")
     parser.add_argument("--color", default=None,
                         help="Forzar color hex del trazo (solo handwriting; "
                              "no confundir con --colors, que es del modo color)")
@@ -693,7 +721,7 @@ def build_parser():
 
 _HANDWRITING_FLAG_DEFAULTS = {
     "blur": 3, "rdp": 1.0, "chaikin": 2, "tension": 0.5,
-    "width": 2.0, "color": None, "no_auto_color": False,
+    "width": 2.0, "contour_sigma": 0.0, "color": None, "no_auto_color": False,
 }
 _COLOR_FLAG_DEFAULTS = {
     "preset": None, "colors": None, "speckle": None,
@@ -738,7 +766,8 @@ def main():
         common = dict(
             mode=args.mode, blur=args.blur,
             rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
-            stroke_width=args.width, auto_color=not args.no_auto_color,
+            stroke_width=args.width, contour_sigma=args.contour_sigma,
+            auto_color=not args.no_auto_color,
             fallback_color=args.color or "#1a1a1a",
         )
 
