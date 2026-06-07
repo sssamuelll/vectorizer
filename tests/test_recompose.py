@@ -298,3 +298,23 @@ def test_main_camino_feliz_sin_empate(monkeypatch, tmp_path, capsys):
     assert svg.exists()
     texto = svg.read_text(encoding="utf-8")
     assert 'class="ink"' in texto and 'class="type"' in texto
+    assert svg.with_name(svg.stem + "_preview.png").exists()
+    assert "re-corridas" in capsys.readouterr().out
+
+
+def test_main_font_a_region_no_recompuesta_avisa(monkeypatch, tmp_path, capsys):
+    """--font sobre región handwriting: WARN a stderr, no silencio."""
+    regs = [
+        _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3,
+                classification="type",
+                ranking=_rank(("Cormorant Garamond", 500, 0.8, False),
+                              ("Lora", 400, 0.7, False))),
+        _region(text="libre", classification="handwriting", score=0.2),
+    ]
+    cache = Path.home() / ".cache" / "vectorizer-fonts"
+    if not (cache / "Cormorant_Garamond_500.ttf").exists():
+        pytest.skip("TTF de caché no disponible")
+    code, _ = _main_con(monkeypatch, tmp_path, regs,
+                        argv_extra=["--font", "libre=Lora:400"])
+    assert code == 0
+    assert "ignorado" in capsys.readouterr().err

@@ -354,6 +354,13 @@ def main():
         print(f"error: {e}", file=sys.stderr)
         raise SystemExit(EXIT_FONT_KEY)
 
+    # --font sobre región que la costura no recompone: avisar, jamás tragar
+    ignoradas = [i for i in choices if i not in recomp_idx]
+    for i in ignoradas:
+        d = decisions[i]
+        print(f"  [WARN] --font para \"{regions[i].text}\" ignorado: "
+              f"la región no se recompone ({d.reason})", file=sys.stderr)
+
     # resolución por región: --font > líder sin empate > ERROR si empate
     pendientes = []
     for i in recomp_idx:
@@ -401,8 +408,8 @@ def main():
                 else Path(args.input).with_name(
                     Path(args.input).stem + "_recompuesto.svg"))
     out_path.write_text(svg_text, encoding="utf-8")
-    print(f"\n[OK] SVG híbrido: {out_path}")
-    print(f"     Tinta: {ink} | caligrafía: {len(callig)} contornos | "
+    print(f"\n  [OK] SVG híbrido: {out_path}")
+    print(f"       Tinta: {ink} | caligrafía: {len(callig)} contornos | "
           f"glifos: {len(glyph_pairs)}")
 
     preview = write_preview(img, svg_text, mask_boxes,
