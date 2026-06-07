@@ -256,6 +256,35 @@ de borde sub-píxel, sin clusters.
 XOR global con tolerancia 2px = 1 píxel, 0 clusters.
 Script: `scripts/scratch_smooth_v2.py` (el barrido: `scripts/scratch_smooth_sweep.py`).
 
+### Ronda 3: bake-off de la 'e' (feedback de Samuel: "muy barrigonas")
+
+Samuel detectó que las 'e' de Cormorant Garamond no calzan: el ojo es más
+grande y el lomo derecho más redondo que el original. Bake-off de 38 familias
+serif cacheadas (todos los pesos), palabra colocada glifo a glifo en posición
+final, IoU exacto por glifo (`scripts/scratch_e_bakeoff.py`):
+
+| familia/peso | e-IoU | word-IoU |
+|---|---|---|
+| Cormorant Garamond 400 | 0.789 | 0.701 |
+| Cormorant Garamond 500 (anterior) | 0.780 | 0.721 |
+| **Nanum Myeongjo 400** | 0.763 | 0.705 |
+| Libre Baskerville 400 | 0.737 | **0.800** |
+
+**Hallazgo para Fase B:** el IoU crudo NO captura la queja perceptual — CG
+seguía ganando en métrica mientras Samuel veía la barriga. El overlay por
+glifo (verde=original, magenta=candidata) sí la expone: ojo de CG demasiado
+grande; Nanum Myeongjo calza crossbar y ojo exactos. La métrica ordena el
+cluster; el desempate fino es visual — confirmación N=2 del principio del spec.
+
+Opciones presentadas en contexto real (A: CG500, B: Nanum Myeongjo 400,
+C: Libre Baskerville 400, D: franken CG+e de NM). **Samuel eligió B.**
+`scripts/scratch_rebuild_text.py` regeneró el grupo de texto: mente →
+Nanum Myeongjo 400, INTEGRATIVE PSYCHOLOGY → STIX Two Text 600 (sin cambio).
+
+Re-verificado: ratio 1.000, deltas 0.0px; XOR global = 1 cluster de 76px
+(astilla de 2px en el stem de la 'm': la 'm' de NM es ~2px más angosta —
+invisible). **Entregable final: 79 KB.**
+
 **Evidencia para Fase B:** las tres condiciones del spec se tocaron aquí en versión
 manual — la recomposición glifo-a-glifo con escala común + alineación bbox da registro
 exacto sin ajuste fino iterativo. El paso que Fase B tendría que automatizar y que aquí
