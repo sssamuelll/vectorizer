@@ -204,3 +204,37 @@ es la más cercana al contraste fino del original.
 no contiene a las garaldas — para logos serif, `--category serif` es prácticamente
 obligatorio. Candidato Fase A.x: elegir la categoría del pool automáticamente desde
 las features del crop, o documentar `--category` como flag recomendado.
+
+## Recomposición híbrida manual — prototipo de Fase B (2026-06-07)
+
+Samuel pidió que el fullres fuera "perfecto". El fullres a resolución nativa (838 KB)
+es fiel en la caligrafía pero conserva el límite estructural: serifas empastadas en
+"mente" y trazos temblorosos en "INTEGRATIVE PSYCHOLOGY". Se ejecutó a mano lo que
+Fase B propone automatizar:
+
+1. **Boxes:** `detect_regions` (OCR) + `segment_glyphs_with_boxes` sobre el original →
+   bboxes absolutos de las 2 regiones y de los 26 glifos (5 + 21).
+2. **Caligrafía:** regiones de texto enmascaradas en blanco (pad 6px) y re-vectorizado
+   contour winner B a resolución nativa → 5 contornos (libre+swash, punto de la i, 3 pájaros).
+3. **Tipografía desde TTF:** fontTools `SVGPathPen` + `BoundsPen`. "mente" con
+   Cormorant Garamond 500, "INTEGRATIVE PSYCHOLOGY" con STIX Two Text 600 (los líderes
+   de la corrida `--category serif`). **Colocación glifo a glifo**: escala COMÚN por
+   región (mediana de altura original/altura font-units — misma filosofía que la métrica
+   de matching), centro-x y fondo del bbox alineados al glifo original. El letterspacing
+   del logo sale gratis de las posiciones originales.
+4. **Verificación cuantitativa:** re-segmentando el render — ratio de altura mediana
+   1.000, delta centro-x 0.0px, delta baseline 0.0px en las dos regiones. XOR binario
+   global con tolerancia 2px: **1 píxel en disputa, 0 clusters ≥30px** (nada recortado
+   por la máscara, nada sobrante).
+
+**Resultado:** `C:\Users\simon\Desktop\Ale\logo_ale_perfecto.svg` — 237 KB (vs 838 KB),
+serifas nítidas con contraste de trazo real, caligrafía intacta.
+Preview: `C:\Users\simon\Desktop\Ale\logo_ale_perfecto_preview.png`.
+
+**Evidencia para Fase B:** las tres condiciones del spec se tocaron aquí en versión
+manual — la recomposición glifo-a-glifo con escala común + alineación bbox da registro
+exacto sin ajuste fino iterativo. El paso que Fase B tendría que automatizar y que aquí
+fue juicio humano: elegir QUÉ regiones recomponer y con qué familia/peso (aquí: los
+líderes de la corrida de aceptación, elegidos visualmente por Samuel/preview).
+Scripts del prototipo: `docs/calibration/scripts/` (paths de usuario hardcodeados —
+son evidencia de calibración, no producto).
