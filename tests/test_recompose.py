@@ -371,7 +371,8 @@ ALLOWED_INTERNAL_IMPORTS = {
     "fontid": {"analyze_regions", "download_family_weights",
                "CACHE_DIR_DEFAULT"},
     "vectorize": {"load_image_bgr", "trace_contours",
-                  "extract_stroke_color", "clean_binary_mask"},
+                  "extract_stroke_color", "clean_binary_mask",
+                  "count_effective_colors"},
 }
 
 
@@ -431,3 +432,23 @@ def test_main_font_offline_recompone_sin_ranking(monkeypatch, tmp_path):
                           argv_extra=["--font", "abc=Cormorant Garamond:500"])
     assert code == 0
     assert src.with_name("logo_recompuesto.svg").exists()
+
+
+# ── HF4: aviso multicolor (spec §7, precondición una tinta) ──────────
+
+def test_main_avisa_multicolor(monkeypatch, tmp_path, capsys):
+    """Imagen con muchos colores → [WARN] a stderr, no aborta."""
+    img = np.zeros((60, 240, 3), np.uint8)
+    for i, col in enumerate([(200, 0, 0), (0, 200, 0), (0, 0, 200), (200, 200, 0),
+                             (200, 0, 200), (0, 200, 200), (120, 60, 30), (30, 120, 200),
+                             (90, 200, 90), (200, 90, 90), (40, 40, 200), (200, 200, 200),
+                             (10, 80, 140), (140, 10, 80)]):
+        img[:, i * 16:(i + 1) * 16] = col
+    src = tmp_path / "multi.png"
+    cv2.imwrite(str(src), img)
+    monkeypatch.setattr(recompose, "analyze_regions", lambda im, **kw: [])
+    monkeypatch.setattr(sys, "argv", ["recompose.py", str(src)])
+    import pytest as _pt
+    with _pt.raises(SystemExit):
+        recompose.main()
+    assert "colores efectivos" in capsys.readouterr().err

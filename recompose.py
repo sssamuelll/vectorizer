@@ -28,13 +28,16 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.ttLib import TTFont
 
 from fontid import CACHE_DIR_DEFAULT, analyze_regions, download_family_weights
-from vectorize import (clean_binary_mask, extract_stroke_color,
-                       load_image_bgr, trace_contours)
+from vectorize import (clean_binary_mask, count_effective_colors,
+                       extract_stroke_color, load_image_bgr, trace_contours)
 
 # exit codes (spec §7)
 EXIT_NADA_QUE_RECOMPONER = 2
 EXIT_EMPATE_PENDIENTE = 3
 EXIT_FONT_KEY = 4
+
+# precondición una tinta (spec §7, HF4)
+COLOR_WARN_THRESHOLD = 12
 
 # caligrafía: ganadores del barrido de calibración (sigma=2 + rdp 0.8 + chaikin 2)
 CALLIG_RDP = 0.8
@@ -356,6 +359,12 @@ def main():
     if img is None:
         sys.exit(f"error: no se pudo cargar {args.input}")
     h, w = img.shape[:2]
+
+    n_colores = count_effective_colors(img)
+    if n_colores > COLOR_WARN_THRESHOLD:
+        print(f"  [WARN] imagen con ~{n_colores} colores efectivos — recompose "
+              f"asume UNA tinta (§ fuera de alcance v0.1). Continúo, pero el color "
+              f"y la máscara pueden no ser fieles.", file=sys.stderr)
 
     try:
         regions = analyze_regions(img, cache_dir=Path(args.cache_dir),
