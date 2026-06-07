@@ -231,6 +231,31 @@ Fase B propone automatizar:
 serifas nítidas con contraste de trazo real, caligrafía intacta.
 Preview: `C:\Users\simon\Desktop\Ale\logo_ale_perfecto_preview.png`.
 
+### Ronda 2 de suavizado (feedback de Samuel: "le falta un poquito")
+
+Barrido sobre la caligrafía solamente (el texto TTF ya es curva perfecta):
+RDP 0.8/1.2, chaikin 3, blur 5 — y dos variantes con **filtro gaussiano
+circular sobre los puntos del contorno ANTES del RDP** (σ=2 y σ=3), que mata
+el ruido de píxel sin deformar la forma (técnica nueva, no está en
+`vectorize.py` — candidata Fase 1.x como flag `--contour-sigma`).
+
+| variante | XOR vs orig (px) | seg. C | tamaño grupo |
+|---|---|---|---|
+| actual (winner B nativo) | 3 939 | 5 124 | 223 KB |
+| rdp 0.8 | 4 216 | 1 700 | 74 KB |
+| rdp 1.2 | 4 523 | 1 252 | 54 KB |
+| **filtro σ=2 + rdp 0.8** | **4 820** | **1 504** | **65 KB** |
+| filtro σ=3 + rdp 0.8 | 5 109 | 1 484 | 65 KB |
+
+Juicio visual a 4× (diagonal larga, pájaro chico, lazo del 'e'): **σ=2 gana** —
+bordes calmados sin perder el pico del pájaro ni los cruces finos; σ=3 ya
+ablanda las uniones. La pérdida de fidelidad XOR (+22% sobre 3 939) es toda
+de borde sub-píxel, sin clusters.
+
+**Entregable final: 81 KB.** Re-verificado: ratio altura 1.000, deltas 0.0px,
+XOR global con tolerancia 2px = 1 píxel, 0 clusters.
+Script: `scripts/scratch_smooth_v2.py` (el barrido: `scripts/scratch_smooth_sweep.py`).
+
 **Evidencia para Fase B:** las tres condiciones del spec se tocaron aquí en versión
 manual — la recomposición glifo-a-glifo con escala común + alineación bbox da registro
 exacto sin ajuste fino iterativo. El paso que Fase B tendría que automatizar y que aquí
