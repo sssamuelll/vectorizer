@@ -17,6 +17,7 @@ Superficie de import CERRADA (test AST la vigila):
 import argparse
 import sys
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -92,6 +93,34 @@ def resolve_font_choices(font_args, regions):
                 f"--font {key!r} matchea {len(matches)} regiones — usa #N")
         out[matches[0]] = (family, wght)
     return out
+
+
+@dataclass
+class SeamDecision:
+    recompose: bool
+    reason: str
+
+
+def seam_decision(region):
+    """La costura (spec §3): classify_region es EL árbitro. El corte 0.65
+    vive DENTRO de fontid (label 'type' ya lo implica). Política
+    provisional con evidencia N=1 — declarada, no escondida."""
+    if region.classification != "type":
+        return SeamDecision(False, f"clasificada {region.classification} "
+                                   f"(score {region.class_score:.2f})")
+    if not region.ranking:
+        return SeamDecision(False, "type sin ranking (conteo glifos≠chars "
+                                   "o pool vacío) — se vectoriza")
+    return SeamDecision(True, f"type (score {region.class_score:.2f})")
+
+
+def print_seam_report(regions, decisions):
+    """La costura SIEMPRE se reporta (junta: 'la frontera más peligrosa
+    era la única sin ceremonia')."""
+    print("Costura (qué se recompone vs qué se vectoriza):")
+    for i, (r, d) in enumerate(zip(regions, decisions), 1):
+        verbo = "recompone" if d.recompose else "vectoriza"
+        print(f"  [{i}] \"{r.text}\" → se {verbo} — {d.reason}")
 
 
 def main():

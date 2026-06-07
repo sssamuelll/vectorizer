@@ -61,3 +61,38 @@ def test_resolver_font_no_match_es_error_duro():
     with pytest.raises(recompose.FontKeyError) as e:
         recompose.resolve_font_choices(["otracosa=Lora:500"], regs)
     assert "mente" in str(e.value)      # lista las claves disponibles
+
+
+# ── costura (spec §3/§6: el tercer clasificador, nombrado) ──────────
+
+def test_costura_type_se_recompone():
+    r = _region(classification="type", ranking=_rank(("Lora", 400, 0.8, False)))
+    decision = recompose.seam_decision(r)
+    assert decision.recompose is True
+
+
+def test_costura_handwriting_se_vectoriza():
+    r = _region(classification="handwriting", score=0.3)
+    d = recompose.seam_decision(r)
+    assert d.recompose is False and "handwriting" in d.reason
+
+
+def test_costura_type_sin_ranking_se_vectoriza():
+    """type pero conteo glifos≠chars (ranking vacío) → degradación POR
+    REGIÓN con razón explícita (spec §7)."""
+    r = _region(classification="type", ranking=[])
+    d = recompose.seam_decision(r)
+    assert d.recompose is False and "ranking" in d.reason
+
+
+def test_reporte_costura_siempre_lista_todas(capsys):
+    regs = [
+        _region(text="mente", classification="type",
+                ranking=_rank(("Lora", 400, 0.8, False))),
+        _region(text="libre", classification="handwriting", score=0.2),
+    ]
+    decisions = [recompose.seam_decision(r) for r in regs]
+    recompose.print_seam_report(regs, decisions)
+    out = capsys.readouterr().out
+    assert "mente" in out and "libre" in out
+    assert "recompone" in out and "vectoriza" in out
