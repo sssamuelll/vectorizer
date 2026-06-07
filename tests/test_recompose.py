@@ -318,3 +318,42 @@ def test_main_font_a_region_no_recompuesta_avisa(monkeypatch, tmp_path, capsys):
                         argv_extra=["--font", "libre=Lora:400"])
     assert code == 0
     assert "ignorado" in capsys.readouterr().err
+
+
+# ── frontera mecánica de imports (spec §4: el CI cierra, no la prosa) ──
+
+ALLOWED_INTERNAL_IMPORTS = {
+    "fontid": {"analyze_regions", "download_family_weights",
+               "CACHE_DIR_DEFAULT"},
+    "vectorize": {"load_image_bgr", "trace_contours",
+                  "extract_stroke_color", "clean_binary_mask"},
+}
+
+
+def test_superficie_de_imports_cerrada():
+    """La superficie declarada en el spec, vigilada por AST. Ampliar la
+    lista exige editar el spec Y este test — a propósito."""
+    import ast
+    src = (Path(__file__).resolve().parent.parent / "recompose.py")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    violaciones = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ALLOWED_INTERNAL_IMPORTS:
+            extra = ({a.name for a in node.names}
+                     - ALLOWED_INTERNAL_IMPORTS[node.module])
+            if extra:
+                violaciones.append(f"{node.module}: {sorted(extra)}")
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name in ALLOWED_INTERNAL_IMPORTS:
+                    violaciones.append(f"import {a.name} completo (prohibido)")
+    assert not violaciones, f"superficie de import violada: {violaciones}"
+
+
+def test_main_guard_ultima_sentencia():
+    """Ley del repo (lección de fontid): if __name__ va al FINAL."""
+    import ast
+    src = (Path(__file__).resolve().parent.parent / "recompose.py")
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    ultimo = tree.body[-1]
+    assert isinstance(ultimo, ast.If) and ultimo.test.left.id == "__name__"
