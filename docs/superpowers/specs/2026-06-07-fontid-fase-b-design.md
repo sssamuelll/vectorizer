@@ -346,3 +346,38 @@ distinta de la regresión de costura; canal formal para "el ojo eligió fuera de
 | `scale_factor` (retirado 2026-06-07) | campo sin consumidor — recompose calcula su propia escala desde los bboxes; centinela 0.0 colisionaba con scale real; si B.x lo necesita, lo recupera de `rank_families` con semántica definida |
 | TTFs upstream sin pin | determinismo definido "dado el mismo caché" + sha256 en provenance |
 | el corte de Stride esconde una necesidad real del chooser | si una corrida real con empate duele lo suficiente, B.2 sube de prioridad con esa evidencia |
+
+## 13. Junta de implementación (2026-06-07) — hallazgos y disposición
+
+Tras implementar v0.1, el roster (Vex Rune, Halberg, Serrano, Null Vale, Iris Tane,
+Richter, Stride) revisó el CÓDIGO real + la corrida de aceptación. Veredicto de Stride:
+SHIP (cero blockers duros, aceptación 0 px). El racimo convergente y barato se **arregló
+antes del PR** (cinco commits, verificados a mano end-to-end):
+
+| arreglo | sillas | commit |
+|---|---|---|
+| `--font` recompone offline (desacopla la costura del ranking — la soberanía no depende de la red) | Halberg/Null Vale/Serrano | `f2a5687` |
+| `FontKeyError` limpio: glifo ausente del cmap / cmap None / TTF corrupto en caché (antes: traceback crudo post-descarga) | Halberg (verif. en vivo)/Serrano/Richter | `e2e17ac` |
+| cortar `scale_factor` (campo muerto + bug de centinela 0.0) | Vex/Null Vale/Serrano | `9e3e6d4` |
+| sanitizar clave de caché desde `--font` (path-traversal latente) | Richter/Serrano | `6aa7f1a` |
+| aviso multicolor §7 (la precondición "una tinta" no se verificaba) | Serrano | `95d1a2d` |
+
+**Deuda B.x registrada** (NO bloquea v0.1; pulido o cambia el artefacto aceptado):
+
+- **Preview (Iris):** el lado-a-lado gasta 72% en margen; las dos regiones se pegan sin
+  canal y leen como un string corrupto; falta banda de zoom para la caligrafía "libre"
+  (el elemento en riesgo); los glifos del zoom se recortan. Mejoras de composición, no
+  de fidelidad — el SVG ya pasa a 0 px.
+- **Dieta del path `.ink` (Iris):** el contorno emite ~1 ancla por píxel (81 KB). Es
+  **idéntico al prototipo aceptado** (por eso el XOR da 0); decimar (Douglas-Peucker
+  sobre la lista de puntos, no solo el sigma gaussiano) cambiaría el artefacto de
+  referencia — va a B.x con su propia re-aceptación.
+- **Contrato de forma única (Richter):** `build_json_draft` (Fase A) recomputa
+  `tie_flags` por su cuenta sobre dicts crudos en vez de leer `RegionAnalysis`. Hoy no
+  muerde (el `--json` está diferido y recompose no lo toca), pero el comentario "ley
+  Halcyon" sobre-promete hasta que B.2 haga a `RegionAnalysis` la única fuente que
+  `build_json_draft` lee.
+- **Determinismo del ranking (Null Vale/Halberg):** `download_family_weights` golpea GF
+  antes de mirar el disco, así que el *ranking automático* necesita red aunque el caché
+  esté caliente. El replay con `--font` explícito ya NO depende de esto (arreglo
+  `f2a5687`); el camino del default sí. Documentado, no arreglado en v0.1.
