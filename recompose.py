@@ -299,9 +299,118 @@ def print_correction_commands(input_path, regions, choices):
                   f'--font "{r.text}={e.family}:{e.wght}"')
 
 
+def build_parser():
+    p = argparse.ArgumentParser(
+        description="Recomposición híbrida v0.1 (replay): caligrafía "
+                    "vectorizada + texto desde TTF. Logos de UNA tinta.")
+    p.add_argument("input", help="Imagen del logo (PNG/JPG)")
+    p.add_argument("-o", "--output", help="SVG de salida "
+                   "(default: <input>_recompuesto.svg)")
+    p.add_argument("--font", action="append", default=[],
+                   metavar='"clave=Familia:wght"',
+                   help='Decisión de fuente por región (repetible). Clave = '
+                        'texto OCR o #N. Obligatorio si la región tiene empate.')
+    p.add_argument("--contour-sigma", type=float, default=2.0,
+                   help="Suavizado de caligrafía (default 2.0, calibrado)")
+    p.add_argument("--category", default=None,
+                   help="Categoría GF del pool (p.ej. serif)")
+    p.add_argument("--pool", type=int, default=60)
+    p.add_argument("--cache-dir", default=str(CACHE_DIR_DEFAULT))
+    return p
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")  # cp1252 crashea con Δ/→
-    raise SystemExit("recompose.py: implementación en progreso (Task 11)")
+    args = build_parser().parse_args()
+
+    img = load_image_bgr(args.input)
+    if img is None:
+        sys.exit(f"error: no se pudo cargar {args.input}")
+    h, w = img.shape[:2]
+
+    try:
+        regions = analyze_regions(img, cache_dir=Path(args.cache_dir),
+                                  pool_size=args.pool, category=args.category)
+    except RuntimeError as e:
+        sys.exit(f"error: {e}")
+
+    if not regions:
+        print("Sin regiones de texto detectadas — nada que recomponer.")
+        print("Para vectorización pura usa: python vectorize.py", args.input)
+        raise SystemExit(EXIT_NADA_QUE_RECOMPONER)
+
+    decisions = [seam_decision(r) for r in regions]
+    print_seam_report(regions, decisions)
+
+    recomp_idx = [i for i, d in enumerate(decisions) if d.recompose]
+    if not recomp_idx:
+        print("\nNinguna región supera la costura — nada que recomponer.")
+        print("Para vectorización pura usa: python vectorize.py", args.input)
+        raise SystemExit(EXIT_NADA_QUE_RECOMPONER)
+
+    try:
+        choices = resolve_font_choices(args.font, regions)
+    except (ValueError, FontKeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(EXIT_FONT_KEY)
+
+    # resolución por región: --font > líder sin empate > ERROR si empate
+    pendientes = []
+    for i in recomp_idx:
+        if i in choices:
+            continue
+        r = regions[i]
+        lider = r.ranking[0]
+        empate = len(r.ranking) > 1 and r.ranking[1].tie
+        if empate:
+            pendientes.append((i, r))
+        else:
+            choices[i] = (lider.family, lider.wght)
+    if pendientes:
+        print("\nEmpate sin decisión (Δ<0.03) — el replay exige --font:")
+        for i, r in pendientes:
+            for e in r.ranking[:4]:
+                marca = " (líder)" if e is r.ranking[0] else ""
+                print(f'  --font "{r.text}={e.family}:{e.wght}"'
+                      f'  # overlap {e.score:.3f}{marca}')
+        raise SystemExit(EXIT_EMPATE_PENDIENTE)
+
+    # compositor
+    cache_dir = Path(args.cache_dir)
+    glyph_pairs = []
+    mask_boxes = []
+    final_choices = {}
+    for i in recomp_idx:
+        r = regions[i]
+        family, wght = choices[i]
+        try:
+            ttf = resolve_ttf(family, wght, cache_dir)
+        except FontKeyError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(EXIT_FONT_KEY)
+        chars = [c for c in r.text if not c.isspace()]
+        glyph_pairs.extend(region_glyph_paths(ttf, chars, r.glyph_boxes))
+        mask_boxes.append(r.bbox)
+        final_choices[i] = (family, wght)
+
+    callig = calligraphy_paths(img, mask_boxes, sigma=args.contour_sigma)
+    ink = extract_stroke_color(img, binary_ink_mask(img))
+    svg_text = compose_svg(w, h, ink, callig, glyph_pairs)
+
+    out_path = (Path(args.output) if args.output
+                else Path(args.input).with_name(
+                    Path(args.input).stem + "_recompuesto.svg"))
+    out_path.write_text(svg_text, encoding="utf-8")
+    print(f"\n[OK] SVG híbrido: {out_path}")
+    print(f"     Tinta: {ink} | caligrafía: {len(callig)} contornos | "
+          f"glifos: {len(glyph_pairs)}")
+
+    preview = write_preview(img, svg_text, mask_boxes,
+                            out_path.with_name(out_path.stem + "_preview.png"))
+    if preview:
+        print(f"     Preview: {preview}")
+    print_correction_commands(args.input, regions, final_choices)
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":

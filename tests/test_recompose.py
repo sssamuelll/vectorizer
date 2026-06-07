@@ -234,3 +234,67 @@ def test_write_preview_con_render(tmp_path, monkeypatch):
     assert out is not None and out.exists()
     loaded = cv2.imread(str(out))
     assert loaded.shape[1] > img.shape[1]     # lado a lado: más ancho
+
+
+# ── main() y exit codes (spec §7) ───────────────────────────────────
+
+def _main_con(monkeypatch, tmp_path, regions, argv_extra=()):
+    img = _logo_sintetico()
+    src = tmp_path / "logo.png"
+    cv2.imwrite(str(src), img)
+    monkeypatch.setattr(recompose, "analyze_regions",
+                        lambda im, **kw: regions)
+    monkeypatch.setattr(sys, "argv",
+                        ["recompose.py", str(src), *argv_extra])
+    with pytest.raises(SystemExit) as e:
+        recompose.main()
+    return e.value.code, src
+
+
+def test_main_sin_regiones_exit_2(monkeypatch, tmp_path, capsys):
+    code, src = _main_con(monkeypatch, tmp_path, [])
+    assert code == recompose.EXIT_NADA_QUE_RECOMPONER
+    assert not src.with_name("logo_recompuesto.svg").exists()
+    assert "vectorize.py" in capsys.readouterr().out
+
+
+def test_main_ninguna_supera_costura_exit_2(monkeypatch, tmp_path, capsys):
+    regs = [_region(text="libre", classification="handwriting", score=0.2)]
+    code, src = _main_con(monkeypatch, tmp_path, regs)
+    assert code == recompose.EXIT_NADA_QUE_RECOMPONER
+    assert "0.2" in capsys.readouterr().out      # scores en el aviso
+
+
+def test_main_empate_sin_font_exit_3(monkeypatch, tmp_path, capsys):
+    regs = [_region(text="mente", classification="type", ranking=_rank(
+        ("Cormorant Garamond", 500, 0.753, False),
+        ("Libre Baskerville", 400, 0.747, True)))]
+    code, _ = _main_con(monkeypatch, tmp_path, regs)
+    assert code == recompose.EXIT_EMPATE_PENDIENTE
+    out = capsys.readouterr().out
+    assert '--font "mente=Cormorant Garamond:500"' in out   # comando sugerido armado
+
+
+def test_main_font_no_match_exit_4(monkeypatch, tmp_path):
+    regs = [_region(text="mente", classification="type",
+                    ranking=_rank(("Lora", 400, 0.8, False)))]
+    code, _ = _main_con(monkeypatch, tmp_path, regs,
+                        argv_extra=["--font", "zzz=Lora:400"])
+    assert code == recompose.EXIT_FONT_KEY
+
+
+def test_main_camino_feliz_sin_empate(monkeypatch, tmp_path, capsys):
+    """Líder sin empate → no exige --font; produce SVG con grupos."""
+    regs = [_region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3,
+                    classification="type",
+                    ranking=_rank(("Cormorant Garamond", 500, 0.8, False),
+                                  ("Lora", 400, 0.7, False)))]
+    cache = Path.home() / ".cache" / "vectorizer-fonts"
+    if not (cache / "Cormorant_Garamond_500.ttf").exists():
+        pytest.skip("TTF de caché no disponible")
+    code, src = _main_con(monkeypatch, tmp_path, regs)
+    assert code == 0
+    svg = src.with_name("logo_recompuesto.svg")
+    assert svg.exists()
+    texto = svg.read_text(encoding="utf-8")
+    assert 'class="ink"' in texto and 'class="type"' in texto
