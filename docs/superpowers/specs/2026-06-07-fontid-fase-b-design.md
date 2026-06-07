@@ -175,7 +175,11 @@ python recompose.py logo.jpeg [-o out.svg]
                                 # empate (Δ<0.03) — sin chooser, el replay exige la
                                 # decisión explícita; sin empate, el líder es default
   --contour-sigma F             # suavizado de caligrafía (default 2.0)
-  --category / --pool / --api   # passthrough a fontid (pool de candidatas)
+  --category / --pool           # passthrough a fontid (pool de candidatas)
+                                # (--api NO entra en v0.1: la fachada analyze_regions
+                                #  no soporta nominaciones API — diferido; fontid.py
+                                #  como CLI las sigue soportando. Hallazgo del review
+                                #  de implementación, 2026-06-07.)
 ```
 
 ### Reglas de la clave `--font` (hallazgo 5 de Serrano — determinismo)
