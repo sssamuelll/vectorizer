@@ -984,10 +984,6 @@ class RegionAnalysis:
     class_score: float
     glyph_boxes: list          # [(x0,y0,x1,y1)] ABSOLUTAS (baseline real)
     ranking: list = field(default_factory=list)   # [RankEntry] desc; vacío si no rankeable
-    scale_factor: float = 0.0  # scale del líder del matching (0.0 sin ranking)
-    # NOTA (junta 2026-06-07, Null Vale): la semántica de scale_factor está
-    # atada al pipeline de segmentación de una tinta. Si B.x lo cambia, el
-    # campo NO conserva el nombre con otro referente.
 
 
 def analyze_regions(img_bgr, cache_dir=CACHE_DIR_DEFAULT, pool_size=60,
@@ -1027,18 +1023,17 @@ def analyze_regions(img_bgr, cache_dir=CACHE_DIR_DEFAULT, pool_size=60,
 
     out = []
     for reg, glyphs, abs_boxes, cls, chars, rankeable in prelim:
-        ranking, scale = [], 0.0
+        ranking = []
         if rankeable and family_weights:
             rows = rank_families(glyphs, chars, family_weights, set())
             if rows:
                 ties = tie_flags([(r["family"], r["overlap"]) for r in rows])
                 ranking = [RankEntry(r["family"], r["wght"], r["overlap"], t)
                            for r, t in zip(rows, ties)]
-                scale = rows[0]["scale"]
         out.append(RegionAnalysis(
             bbox=tuple(int(v) for v in reg["bbox"]), text=reg["text"],
             classification=cls["label"], class_score=float(cls["score"]),
-            glyph_boxes=abs_boxes, ranking=ranking, scale_factor=scale))
+            glyph_boxes=abs_boxes, ranking=ranking))
     return out
 
 

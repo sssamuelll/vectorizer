@@ -20,7 +20,7 @@ def _region(text="mente", bbox=(10, 10, 100, 40), classification="type",
     return fontid.RegionAnalysis(
         bbox=bbox, text=text, classification=classification,
         class_score=score, glyph_boxes=boxes,
-        ranking=ranking or [], scale_factor=0.15)
+        ranking=ranking or [])
 
 
 def _rank(*tuples):

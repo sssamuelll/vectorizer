@@ -480,7 +480,6 @@ def test_analyze_regions_compone_la_tuberia(monkeypatch):
     assert all(b[0] >= 20 and b[1] >= 30 for b in r1.glyph_boxes)  # ABSOLUTAS
     assert r1.ranking[0].family == "Fam A" and r1.ranking[0].wght == 400
     assert r1.ranking[1].tie is True          # Δ=0.01 < TIE_DELTA 0.03
-    assert r1.scale_factor == 0.15
 
 
 def test_analyze_regions_handwriting_sin_ranking(monkeypatch):
@@ -494,7 +493,7 @@ def test_analyze_regions_handwriting_sin_ranking(monkeypatch):
     monkeypatch.setattr(fi, "fetch_metadata",
                         lambda cd: llamado.append(1) or [])
     out = fi.analyze_regions(img)
-    assert out[0].ranking == [] and out[0].scale_factor == 0.0
+    assert out[0].ranking == []
     assert not llamado          # sin región type NO se toca la red
 
 

@@ -122,7 +122,6 @@ class RegionAnalysis:
     class_score: float
     glyph_boxes: list[tuple[int, int, int, int]]  # absolutas (baseline real conservada)
     ranking: list[RankEntry]                  # (family, wght, score, tie) — vacío si class != type
-    scale_factor: float                       # mediana alturas crop/render del matching
 
 def analyze_regions(img_bgr) -> list[RegionAnalysis]
 ```
@@ -130,10 +129,11 @@ def analyze_regions(img_bgr) -> list[RegionAnalysis]
 Envuelve la tubería existente (`detect_regions` → `segment_glyphs_with_boxes` →
 `classify_region` → `rank_families`); **las funciones actuales no se deprecan ni
 cambian de firma** — siguen siendo la API de los tests y del CLI de fontid;
-`analyze_regions` es una fachada de composición. La nota de Null Vale sobre
-`scale_factor` queda registrada: su semántica está atada al pipeline de segmentación
-de una tinta; si B.x lo cambia, el campo NO puede conservar el nombre con otro
-significado (deuda anotada, no resuelta).
+`analyze_regions` es una fachada de composición.
+
+> **Nota (scale_factor retirado 2026-06-07, junta):** campo sin consumidor — recompose
+> calcula su propia escala desde los bboxes; el centinela 0.0 colisionaba con un scale
+> real. Si B.x lo necesita, lo recupera de `rank_families` con semántica definida.
 
 ### `--contour-sigma` — punto de inyección exacto (BLOCKER 2 de Serrano)
 
@@ -343,6 +343,6 @@ distinta de la regresión de costura; canal formal para "el ojo eligió fuera de
 | la máquina confiada-y-equivocada (caso 'e') | preview + comandos SIEMPRE; resolución plena (overlay, chooser) en B.2 |
 | replay ciego a regresión de juicio | nombrado como deuda B.2; replay etiquetado "regresión de costura" |
 | 0.65 con evidencia N=1 | declarado provisional con deuda de calibración; costura siempre reportada |
-| `scale_factor` cambia de semántica si B.x cambia la segmentación | anotado en §4; el nombre no sobrevive a un cambio de referente |
+| `scale_factor` (retirado 2026-06-07) | campo sin consumidor — recompose calcula su propia escala desde los bboxes; centinela 0.0 colisionaba con scale real; si B.x lo necesita, lo recupera de `rank_families` con semántica definida |
 | TTFs upstream sin pin | determinismo definido "dado el mismo caché" + sha256 en provenance |
 | el corte de Stride esconde una necesidad real del chooser | si una corrida real con empate duele lo suficiente, B.2 sube de prioridad con esa evidencia |
