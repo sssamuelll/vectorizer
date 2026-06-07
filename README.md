@@ -91,6 +91,32 @@ python fontid.py logo.png --api                    # nominación Claude (opt-in:
 - Con `--json` la salida es solo JSON (pipe-limpio); es una **emisión draft** (su
   esquema puede cambiar cuando la Fase B de recomposición firme sus requisitos).
 
+## Recomposición híbrida (recompose.py, Fase B v0.1)
+
+Para logos de **una tinta** donde el texto tipográfico duele al vectorizarlo:
+caligrafía vectorizada desde la imagen + texto recompuesto desde el TTF de la
+fuente aproximada (Google Fonts), glifo a glifo en las posiciones originales.
+
+```bash
+# camino feliz (sin empate de fuente):
+python recompose.py logo.jpeg
+
+# con empate (Δ<0.03) el replay exige la decisión — el error la deja armada:
+python recompose.py logo.jpeg --font "mente=Nanum Myeongjo:400"
+
+# la clave es el texto OCR de la región (o #N); la familia puede NO estar
+# en el ranking — el ojo manda:
+python recompose.py logo.jpeg --font "#2=STIX Two Text:600" --category serif
+```
+
+Salidas: `<input>_recompuesto.svg` + `_preview.png` (original | vector, con
+zoom por región) + comandos de corrección en stdout. Exit codes: 2 = nada que
+recomponer, 3 = empate pendiente, 4 = clave/peso `--font` inválido.
+
+El output automático es un **candidato** — la elección de fuente fina es
+juicio visual (mira el preview; corrige con `--font`). El chooser interactivo
+es B.2 (spec).
+
 ## Parámetros
 
 | flag | default | qué controla |
