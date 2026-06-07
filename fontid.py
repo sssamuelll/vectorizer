@@ -21,6 +21,7 @@ import urllib.parse
 import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -958,6 +959,79 @@ def classify_region(glyph_masks, text, boxes=None):
         "repeats_used": repeats_used,
     })
     return base
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 3g. FACHADA DE ANÁLISIS — contrato de Fase B (spec 2026-06-07 §4)
+#     UNA sola fuente de forma (ley Halcyon). Las funciones de la
+#     tubería NO cambian; esto las compone. El --json sigue siendo
+#     emisión draft: el congelamiento espera al primer consumidor.
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class RankEntry:
+    family: str
+    wght: int
+    score: float
+    tie: bool          # empatada con el líder (Δ < TIE_DELTA)
+
+
+@dataclass
+class RegionAnalysis:
+    bbox: tuple                # (x0,y0,x1,y1) ABSOLUTAS en la imagen
+    text: str                  # texto OCR (o forzado)
+    classification: str        # "type" | "handwriting" | "uncertain"
+    class_score: float
+    glyph_boxes: list          # [(x0,y0,x1,y1)] ABSOLUTAS (baseline real)
+    ranking: list = field(default_factory=list)   # [RankEntry] desc; vacío si no rankeable
+    scale_factor: float = 0.0  # scale del líder del matching (0.0 sin ranking)
+    # NOTA (junta 2026-06-07, Null Vale): la semántica de scale_factor está
+    # atada al pipeline de segmentación de una tinta. Si B.x lo cambia, el
+    # campo NO conserva el nombre con otro referente.
+
+
+def analyze_regions(img_bgr, cache_dir=CACHE_DIR_DEFAULT, pool_size=60,
+                    category=None):
+    """Fachada Fase B: OCR → segmentación → clasificación → ranking.
+
+    Boxes de glifos convertidas a ABSOLUTAS (las de segment_glyphs_with_boxes
+    son relativas al crop). La red (metadata/pool/pesos) solo se toca si hay
+    al menos una región type con conteo glifos==chars (rankeable).
+    Regiones type con conteo desigual quedan con ranking=[] — el caller
+    decide la degradación (spec §7).
+    """
+    prelim = []
+    for reg in detect_regions(img_bgr):
+        x0, y0, x1, y1 = reg["bbox"]
+        glyphs, gboxes = segment_glyphs_with_boxes(img_bgr[y0:y1, x0:x1])
+        abs_boxes = [(int(bx0 + x0), int(by0 + y0), int(bx1 + x0), int(by1 + y0))
+                     for bx0, by0, bx1, by1 in gboxes]
+        cls = classify_region(glyphs, reg["text"], boxes=gboxes)
+        chars = [c for c in reg["text"] if not c.isspace()]
+        rankeable = cls["label"] == "type" and len(glyphs) == len(chars)
+        prelim.append((reg, glyphs, abs_boxes, cls, chars, rankeable))
+
+    family_weights = {}
+    if any(p[5] for p in prelim):
+        metadata = fetch_metadata(cache_dir)
+        pool = build_pool(metadata, pool_size=pool_size, category=category)
+        family_weights = prepare_pool_weights(pool, cache_dir)
+
+    out = []
+    for reg, glyphs, abs_boxes, cls, chars, rankeable in prelim:
+        ranking, scale = [], 0.0
+        if rankeable and family_weights:
+            rows = rank_families(glyphs, chars, family_weights, set())
+            if rows:
+                ties = tie_flags([(r["family"], r["overlap"]) for r in rows])
+                ranking = [RankEntry(r["family"], r["wght"], r["overlap"], t)
+                           for r, t in zip(rows, ties)]
+                scale = rows[0]["scale"]
+        out.append(RegionAnalysis(
+            bbox=tuple(int(v) for v in reg["bbox"]), text=reg["text"],
+            classification=cls["label"], class_score=float(cls["score"]),
+            glyph_boxes=abs_boxes, ranking=ranking, scale_factor=scale))
+    return out
 
 
 if __name__ == "__main__":
