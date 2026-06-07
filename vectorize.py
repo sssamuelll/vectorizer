@@ -318,9 +318,9 @@ def _gauss_filter_closed(pts, sigma):
     Ganador del barrido de suavizado (calibración 2026-06-07, sigma=2).
     sigma<=0 o contorno corto → passthrough."""
     n = len(pts)
-    if n < 8 or sigma <= 0:
+    radius = max(1, int(3 * sigma)) if sigma > 0 else 0
+    if n < 8 or sigma <= 0 or radius >= n:
         return pts
-    radius = max(1, int(3 * sigma))
     xs = np.arange(-radius, radius + 1)
     kernel = np.exp(-(xs ** 2) / (2 * sigma ** 2))
     kernel /= kernel.sum()

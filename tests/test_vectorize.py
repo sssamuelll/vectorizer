@@ -266,8 +266,8 @@ def _circle_binary(noise_seed=None):
 
 
 def test_sigma_cero_output_identico():
-    """sigma=0 (default) debe producir EXACTAMENTE el output actual —
-    cero regresión para todos los llamadores existentes."""
+    """default y sigma=0.0 explícito toman el mismo passthrough — la firma
+    nueva no altera a los llamadores existentes."""
     binary = _circle_binary(noise_seed=7)
     antes = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2)
     despues = vz.trace_contours(binary, rdp_eps=0.8, chaikin_iter=2,
@@ -302,6 +302,13 @@ def test_gauss_filter_closed_preserva_forma():
     out = vz._gauss_filter_closed(pts, sigma=2.0)
     assert out.shape == pts.shape
     assert np.linalg.norm(out.mean(axis=0) - pts.mean(axis=0)) < 0.5
+
+
+def test_gauss_filter_contorno_corto_passthrough():
+    """Contorno con 8<=n<=3*sigma NO crashea: passthrough (radius >= n)."""
+    pts = np.arange(16, dtype=np.float64).reshape(8, 2)
+    out = vz._gauss_filter_closed(pts, sigma=3.0)
+    assert np.array_equal(out, pts)
 
 
 def test_no_warning_when_flags_match_mode(capsys):
