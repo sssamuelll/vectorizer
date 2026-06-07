@@ -477,15 +477,18 @@ Como mínimo, Fase B necesitará **por glifo**:
 draft"**, no contrato. El nombre es deliberado: avisa a cualquier consumidor de que la
 estructura aún puede cambiar cuando Fase B firme.
 
-*✅ Resuelta 2026-06-07 — Fase B firmó.* El contrato tiene **una sola fuente de forma**
-(hallazgo de Voronov + ley Halcyon: dos representaciones de la misma política divergen):
-la dataclass `RegionAnalysis` en fontid.py, expuesta vía `analyze_regions(img)`, desde la
-cual se serializa el `--json` **v1** (campo `"contract": 1`). Campos firmados: `bbox`,
-`text`, `classification`+score, `glyph_boxes` absolutos (cubren el requisito de baseline:
-conservan la posición vertical real), `ranking` [(family, wght, score, tie)],
-`scale_factor`. `opsz` queda como campo **reservado** (nullable, no implementado en B —
-el prototipo alcanzó registro 0.0px sin él). Detalle en `2026-06-07-fontid-fase-b-design.md`
-§3-4.
+*✅ Resuelta 2026-06-07 — Fase B firmó la FORMA; el congelamiento público se difirió
+(junta v2).* El contrato tiene **una sola fuente de forma** (hallazgo de Voronov + ley
+Halcyon: dos representaciones de la misma política divergen): la dataclass
+`RegionAnalysis` en fontid.py, expuesta vía `analyze_regions(img)`. Campos firmados:
+`bbox`, `text`, `classification`+score, `glyph_boxes` absolutos (cubren el requisito de
+baseline: conservan la posición vertical real), `ranking` [(family, wght, score, tie)],
+`scale_factor`. **El `--json` sigue siendo "emisión draft"**: la junta del 2026-06-07
+(Stride, Richter) mató el congelamiento sin consumidor — el contrato v1 se ratifica
+cuando exista el primer consumidor externo (B.2 o tercero). `opsz` queda **fuera** del
+contrato hasta implementarse: un campo reservado nullable tenía dos semánticas de null
+indistinguibles ("no tiene eje" vs "no lo capturamos"). Detalle en
+`2026-06-07-fontid-fase-b-design.md` §3-4.
 
 ## Riesgos conocidos (resueltos o vivos)
 
