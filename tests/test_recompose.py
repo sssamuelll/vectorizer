@@ -132,10 +132,29 @@ TTF_TEST = CACHE / "Cormorant_Garamond_500.ttf"
                     reason="TTF de caché no disponible (corre fontid primero)")
 def test_region_glyph_paths_con_ttf_real():
     boxes = [(100 + i * 60, 50, 150 + i * 60, 110) for i in range(5)]
-    pairs = recompose.region_glyph_paths(TTF_TEST, "mente", boxes)
+    pairs = recompose.region_glyph_paths(TTF_TEST, "mente", boxes,
+                                         "Cormorant Garamond")
     assert len(pairs) == 5
     for d, tr in pairs:
         assert d and tr.startswith("translate(")
+
+
+@pytest.mark.skipif(not TTF_TEST.exists(),
+                    reason="TTF de caché no disponible")
+def test_region_glyph_paths_char_sin_glifo(tmp_path):
+    """Un char fuera del cmap → FontKeyError nombrando el char, no KeyError crudo."""
+    with pytest.raises(recompose.FontKeyError) as e:
+        recompose.region_glyph_paths(TTF_TEST, "中", [(0, 0, 50, 60)],
+                                     "Cormorant Garamond")
+    assert "中" in str(e.value)
+
+
+def test_region_glyph_paths_ttf_corrupto(tmp_path):
+    """TTF basura → FontKeyError, no TTLibError crudo."""
+    bad = tmp_path / "Basura_400.ttf"
+    bad.write_bytes(b"no soy una fuente")
+    with pytest.raises(recompose.FontKeyError):
+        recompose.region_glyph_paths(bad, "a", [(0, 0, 50, 60)], "Basura")
 
 
 # ── resolución de TTF (spec §5: cualquier familia GF, on-demand) ────

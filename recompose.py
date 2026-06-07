@@ -150,17 +150,31 @@ def glyph_transform(font_bbox, glyph_box, s):
     return f"translate({tx:.2f} {ty:.2f}) scale({s:.5f} -{s:.5f})"
 
 
-def region_glyph_paths(ttf_path, chars, glyph_boxes):
+def region_glyph_paths(ttf_path, chars, glyph_boxes, family):
     """[(path_d, transform)] por glifo. chars SIN espacios, len == len(boxes)
-    (la costura ya lo garantizó). KeyError si un char no está en el cmap."""
-    font = TTFont(str(ttf_path))
+    (la costura ya lo garantizó). FontKeyError si TTF corrupto, sin cmap,
+    char ausente o glifo sin bounds."""
+    try:
+        font = TTFont(str(ttf_path))
+    except Exception as e:
+        raise FontKeyError(
+            f"no se pudo cargar la fuente {family!r} ({ttf_path.name}): {e}")
     glyph_set = font.getGlyphSet()
     cmap = font.getBestCmap()
+    if cmap is None:
+        raise FontKeyError(
+            f"la fuente {family!r} no tiene tabla cmap Unicode")
     info = []
     for ch in chars:
+        if ord(ch) not in cmap:
+            raise FontKeyError(
+                f"la fuente {family!r} no tiene glifo para {ch!r}")
         gname = cmap[ord(ch)]
         bp = BoundsPen(glyph_set)
         glyph_set[gname].draw(bp)
+        if bp.bounds is None:
+            raise FontKeyError(
+                f"la fuente {family!r} no dibuja glifo para {ch!r}")
         info.append((gname, bp.bounds))
     s = common_scale([fb for _, fb in info], glyph_boxes)
     out = []
@@ -413,7 +427,12 @@ def main():
         sha = hashlib.sha256(ttf.read_bytes()).hexdigest()[:16]
         provenance.append(f"{family}:{wght} sha256:{sha}")
         chars = [c for c in r.text if not c.isspace()]
-        glyph_pairs.extend(region_glyph_paths(ttf, chars, r.glyph_boxes))
+        try:
+            glyph_pairs.extend(
+                region_glyph_paths(ttf, chars, r.glyph_boxes, family))
+        except FontKeyError as e:
+            print(f"error: {e}", file=sys.stderr)
+            raise SystemExit(EXIT_FONT_KEY)
         mask_boxes.append(r.bbox)
         final_choices[i] = (family, wght)
 
