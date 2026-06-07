@@ -1,21 +1,55 @@
 #!/usr/bin/env python3
 """
-Vectorizador de Handwriting a SVG — v5 Final (Limpio)
+Vectorizador de imágenes a SVG — dos pipelines:
+
+Handwriting (modos contour/skeleton/both):
   • Color real del trazo (filtro HSV)
   • Limpieza automática de ruido y líneas
   • Skeleton tracing con loops cerrados
   • Agujeros topológicos reales
   • Curvas Bézier cúbicas suaves
 
+Color (--mode color, vía vtracer):
+  • Logos, ilustraciones y fotos (posterizadas)
+  • Presets logo/drawing/photo + flags de ajuste fino
+
 Dependencias:
-    pip install opencv-python numpy
+    pip install -r requirements.txt
+    (opencv-contrib-python, numpy; vtracer solo para --mode color)
 """
 
 import cv2
 import numpy as np
 from pathlib import Path
 import argparse
+import sys
 import xml.etree.ElementTree as ET
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 0. CARGA DE IMAGEN (política de alpha compartida)
+# ═══════════════════════════════════════════════════════════════════
+
+def load_image_bgr(image_path):
+    """Carga una imagen como BGR uint8, componiendo alpha sobre blanco.
+
+    cv2.imread por defecto descarta el canal alpha: un PNG transparente
+    entra con fondo negro basura. Aquí: IMREAD_UNCHANGED + composición
+    sobre blanco. Una sola política para todos los pipelines.
+    Devuelve None si la imagen no se puede cargar (igual que cv2.imread).
+    """
+    img = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+    if img.dtype == np.uint16:                    # PNG de 16 bits → 8 bits
+        img = (img // 257).astype(np.uint8)
+    if img.ndim == 2:                             # escala de grises → BGR
+        return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    if img.shape[2] == 4:                         # BGRA → componer sobre blanco
+        alpha = img[:, :, 3:4].astype(np.float64) / 255.0
+        bgr = img[:, :, :3].astype(np.float64)
+        return (bgr * alpha + 255.0 * (1.0 - alpha)).astype(np.uint8)
+    return img
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -336,6 +370,163 @@ def trace_contours(binary, rdp_eps=1.0, chaikin_iter=1, tension=0.5,
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 6.5. PIPELINE DE COLOR (vtracer)
+# ═══════════════════════════════════════════════════════════════════
+
+SVG_NS = "http://www.w3.org/2000/svg"
+
+
+def _vtracer_convert(png_bytes,
+                     colormode="color", hierarchical="stacked", mode="spline",
+                     filter_speckle=4, color_precision=6, layer_difference=16,
+                     corner_threshold=60, length_threshold=4.0,
+                     max_iterations=10, splice_threshold=45, path_precision=3):
+    """Única puerta hacia vtracer. Invoca SIEMPRE en forma 100% posicional.
+
+    NUNCA pasar kwargs a vtracer: el binding PyO3 del wheel cp314 produce
+    SIGSEGV (ACCESS_VIOLATION 0xC0000005) con cualquier keyword argument
+    en Python 3.14 — mata el proceso sin excepción capturable.
+    Verificado 2026-06-05 (spec, hechos runtime 2-4). Orden posicional:
+    (img_bytes, img_format, colormode, hierarchical, mode, filter_speckle,
+     color_precision, layer_difference, corner_threshold, length_threshold,
+     max_iterations, splice_threshold, path_precision)
+    """
+    try:
+        import vtracer
+    except ImportError:
+        raise RuntimeError(
+            "El modo color requiere vtracer. Instala con: pip install vtracer"
+        ) from None
+    return vtracer.convert_raw_image_to_svg(
+        png_bytes, "png", colormode, hierarchical, mode,
+        filter_speckle, color_precision, layer_difference,
+        corner_threshold, length_threshold, max_iterations,
+        splice_threshold, path_precision,
+    )
+
+
+def count_effective_colors(img_bgr, k=16, coverage=0.95, max_side=256,
+                           sample_px=10000, seed=42):
+    """Cuenta colores efectivos: nº de clusters k-means (LAB) que cubren
+    `coverage` de los píxeles, ordenados por población.
+
+    Determinismo obligatorio (spec): semilla fija, KMEANS_PP_CENTERS y
+    attempts=3 — con RANDOM_CENTERS el conteo varía entre corridas.
+    k=16 para resolver el umbral de preset (12).
+    """
+    h, w = img_bgr.shape[:2]
+    if max(h, w) > max_side:
+        s = max_side / max(h, w)
+        img_bgr = cv2.resize(img_bgr, (max(1, int(w * s)), max(1, int(h * s))),
+                             interpolation=cv2.INTER_AREA)
+    lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+    pixels = lab.reshape(-1, 3).astype(np.float32)
+    if len(pixels) > sample_px:
+        rng = np.random.default_rng(seed)
+        pixels = pixels[rng.choice(len(pixels), sample_px, replace=False)]
+    k = min(k, len(pixels))
+    cv2.setRNGSeed(seed)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.5)
+    _, labels, _ = cv2.kmeans(pixels, k, None, criteria, 3,
+                              cv2.KMEANS_PP_CENTERS)
+    counts = np.sort(np.bincount(labels.flatten(), minlength=k))[::-1]
+    cum = np.cumsum(counts) / counts.sum()
+    return int(np.searchsorted(cum, coverage) + 1)
+
+
+def choose_preset(img_bgr):
+    """≤12 colores efectivos → logo; >12 → photo.
+
+    `drawing` solo se activa manualmente (--preset drawing) — decisión
+    intencional del spec: el conteo de color no separa de forma fiable
+    una ilustración con gradientes de un logo o una foto.
+    """
+    n = count_effective_colors(img_bgr)
+    preset = "logo" if n <= 12 else "photo"
+    print(f"  [PRESET] {preset} ({n} colores efectivos)")
+    return preset
+
+
+COLOR_PRESETS = {
+    # spec: tabla de presets. Comunes a los tres: mode=spline,
+    # hierarchical=stacked, path_precision=3 (defaults del wrapper).
+    "logo":    dict(filter_speckle=8, color_precision=6,
+                    layer_difference=48, corner_threshold=45),
+    "drawing": dict(filter_speckle=4, color_precision=7,
+                    layer_difference=24, corner_threshold=60),
+    "photo":   dict(filter_speckle=4, color_precision=8,
+                    layer_difference=12, corner_threshold=60),
+}
+
+
+def _write_svg_scaled(svg_text, out_path, orig_w, orig_h, work_w, work_h):
+    """Post-proceso del SVG de vtracer (spec, hecho runtime 7).
+
+    vtracer emite el root SIN viewBox → se añade (dims de trabajo) y se
+    reescriben width/height (dims originales) — la misma política de
+    escala del pipeline handwriting. register_namespace ANTES de parsear
+    o ElementTree contamina el roundtrip con prefijos ns0:.
+    Si el post-proceso falla: se escribe tal cual CON warning (la
+    degradación silenciosa era una contradicción del spec v1).
+    """
+    out_path = Path(out_path)
+    try:
+        ET.register_namespace("", SVG_NS)
+        root = ET.fromstring(svg_text)
+        root.set("width", str(orig_w))
+        root.set("height", str(orig_h))
+        root.set("viewBox", f"0 0 {work_w} {work_h}")
+        ET.ElementTree(root).write(out_path, encoding="utf-8",
+                                   xml_declaration=True)
+    except ET.ParseError as e:
+        print(f"  [WARN] Post-proceso del SVG falló ({e}); "
+              f"se escribe sin escalar — dims de vtracer, no originales.")
+        out_path.write_text(svg_text, encoding="utf-8")
+    return out_path
+
+
+def vectorize_color(image_path, output_path=None, preset=None, max_dim=1200,
+                    **overrides):
+    """Vectoriza una imagen a color con vtracer (logos, ilustraciones, fotos).
+
+    preset:
+      - None (default): se elige solo — ≤12 colores efectivos → logo, >12 → photo.
+      - "logo" | "drawing" | "photo": explícito.
+    max_dim: resize previo en memoria si el lado mayor lo supera (0 = sin resize).
+    overrides: filter_speckle, color_precision, layer_difference,
+               corner_threshold, path_precision — pisan el preset (None = no pisa).
+    """
+    img = load_image_bgr(image_path)
+    if img is None:
+        raise ValueError(f"No se pudo cargar: {image_path}")
+
+    orig_h, orig_w = img.shape[:2]
+    work = img
+    if max_dim and max(orig_w, orig_h) > max_dim:
+        s = max_dim / max(orig_w, orig_h)
+        work = cv2.resize(img, (int(orig_w * s), int(orig_h * s)),
+                          interpolation=cv2.INTER_AREA)
+    work_h, work_w = work.shape[:2]
+
+    if preset is None:
+        preset = choose_preset(work)
+    params = dict(COLOR_PRESETS[preset])
+    params.update({k: v for k, v in overrides.items() if v is not None})
+
+    ok, buf = cv2.imencode(".png", work)
+    if not ok:
+        raise ValueError(f"No se pudo codificar a PNG: {image_path}")
+    svg_text = _vtracer_convert(buf.tobytes(), **params)
+
+    out = Path(output_path) if output_path else Path(image_path).with_suffix(".svg")
+    _write_svg_scaled(svg_text, out, orig_w, orig_h, work_w, work_h)
+
+    print(f"  [OK] SVG: {out}")
+    print(f"       Modo: color | Preset: {preset}")
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 7. PIPELINE
 # ═══════════════════════════════════════════════════════════════════
 
@@ -369,7 +560,7 @@ def vectorize(image_path, output_path=None,
     if mode not in ("contour", "skeleton", "both"):
         raise ValueError(f"mode must be contour|skeleton|both, got {mode!r}")
 
-    img = cv2.imread(str(image_path))
+    img = load_image_bgr(image_path)
     if img is None:
         raise ValueError(f"No se pudo cargar: {image_path}")
 
@@ -458,35 +649,101 @@ def vectorize(image_path, output_path=None,
 # 8. MAIN
 # ═══════════════════════════════════════════════════════════════════
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(
-        description="Vectoriza handwriting a SVG (contour + skeleton tracers)"
+        description="Vectoriza imágenes a SVG: handwriting (contour/skeleton) "
+                    "o color con vtracer (logos, ilustraciones, fotos)"
     )
     parser.add_argument("input", help="Imagen PNG/JPG o directorio")
     parser.add_argument("-o", "--output", help="SVG o directorio de salida")
-    parser.add_argument("--mode", choices=("contour", "skeleton", "both"),
+    parser.add_argument("--mode", choices=("contour", "skeleton", "both", "color"),
                         default="contour",
-                        help="contour=relleno fiel | skeleton=línea fina | both=ambos")
+                        help="contour=relleno fiel | skeleton=línea fina | "
+                             "both=ambos | color=vtracer full-color")
+    # flags handwriting (solo modos contour/skeleton/both)
     parser.add_argument("--blur", type=int, default=3)
     parser.add_argument("--rdp", type=float, default=1.0)
     parser.add_argument("--chaikin", type=int, default=2)
     parser.add_argument("--tension", type=float, default=0.5)
     parser.add_argument("--width", type=float, default=2.0,
                         help="Stroke width for skeleton mode")
-    parser.add_argument("--color", default=None, help="Forzar color hex")
+    parser.add_argument("--color", default=None,
+                        help="Forzar color hex del trazo (solo handwriting; "
+                             "no confundir con --colors, que es del modo color)")
     parser.add_argument("--no-auto-color", action="store_true")
+    # flags color (solo modo color)
+    parser.add_argument("--preset", choices=("logo", "drawing", "photo"),
+                        default=None,
+                        help="Preset del modo color (default: auto por "
+                             "colores efectivos; drawing solo manual)")
+    parser.add_argument("--colors", type=int, default=None,
+                        help="color_precision de vtracer")
+    parser.add_argument("--speckle", type=int, default=None,
+                        help="filter_speckle de vtracer")
+    parser.add_argument("--layer-diff", type=int, default=None,
+                        help="layer_difference de vtracer")
+    parser.add_argument("--corner", type=int, default=None,
+                        help="corner_threshold de vtracer")
+    parser.add_argument("--path-precision", type=int, default=None,
+                        help="Decimales de coordenadas en el SVG")
+    parser.add_argument("--max-dim", type=int, default=1200,
+                        help="Resize previo del modo color (0 = sin resize)")
+    return parser
 
-    args = parser.parse_args()
+
+_HANDWRITING_FLAG_DEFAULTS = {
+    "blur": 3, "rdp": 1.0, "chaikin": 2, "tension": 0.5,
+    "width": 2.0, "color": None, "no_auto_color": False,
+}
+_COLOR_FLAG_DEFAULTS = {
+    "preset": None, "colors": None, "speckle": None,
+    "layer_diff": None, "corner": None, "path_precision": None,
+    "max_dim": 1200,
+}
+
+
+def warn_inert_flags(args):
+    """Avisa de flags que no aplican al modo activo (spec: nada se ignora
+    en silencio). El flag inerte se reporta; no altera el resultado."""
+    inert = (_HANDWRITING_FLAG_DEFAULTS if args.mode == "color"
+             else _COLOR_FLAG_DEFAULTS)
+    for name, default in inert.items():
+        if getattr(args, name) != default:
+            print(f"  [WARN] --{name.replace('_', '-')} no aplica al modo "
+                  f"{args.mode}; ignorado.")
+
+
+def main():
+    args = build_parser().parse_args()
     input_path = Path(args.input)
     output_path = Path(args.output) if args.output else None
-    auto_color = not args.no_auto_color
-    fallback = args.color or "#1a1a1a"
 
-    common = dict(
-        mode=args.mode, blur=args.blur,
-        rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
-        stroke_width=args.width, auto_color=auto_color, fallback_color=fallback,
-    )
+    warn_inert_flags(args)
+
+    if args.mode == "color":
+        try:
+            import vtracer  # noqa: F401 — fail fast antes de procesar
+        except ImportError:
+            print("El modo color requiere vtracer. Instala con: pip install vtracer")
+            sys.exit(1)
+
+        def run_one(f, out):
+            return vectorize_color(
+                f, output_path=out, preset=args.preset, max_dim=args.max_dim,
+                filter_speckle=args.speckle, color_precision=args.colors,
+                layer_difference=args.layer_diff, corner_threshold=args.corner,
+                path_precision=args.path_precision,
+            )
+    else:
+        common = dict(
+            mode=args.mode, blur=args.blur,
+            rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
+            stroke_width=args.width, auto_color=not args.no_auto_color,
+            fallback_color=args.color or "#1a1a1a",
+        )
+
+        def run_one(f, out):
+            return vectorize(f, output_path=out, **common)
 
     if input_path.is_dir():
         exts = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp")
@@ -497,15 +754,20 @@ def main():
         out_dir = output_path or input_path / "svg_output"
         out_dir.mkdir(exist_ok=True)
         print(f"Procesando {len(files)} imágenes ({args.mode})...\n")
+        done, failed = 0, 0
         for i, f in enumerate(files, 1):
             print(f"[{i}/{len(files)}] {f.name}")
             try:
-                vectorize(f, output_path=out_dir / f.with_suffix(".svg").name, **common)
+                run_one(f, out_dir / f.with_suffix(".svg").name)
+                done += 1
             except Exception as e:
                 print(f"   [ERR] {e}")
+                failed += 1
             print()
+        # Resumen agregado: comportamiento NUEVO de Fase 1 (declarado en spec)
+        print(f"Resumen: {done} OK ({args.mode}), {failed} fallos.")
     else:
-        vectorize(input_path, output_path=output_path, **common)
+        run_one(input_path, output_path)
 
 
 if __name__ == "__main__":

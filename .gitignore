@@ -3,3 +3,4 @@ __pycache__/
 svg_output/
 .venv/
 venv/
+ttf_cache/
