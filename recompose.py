@@ -102,17 +102,20 @@ class SeamDecision:
     reason: str
 
 
-def seam_decision(region):
+def seam_decision(region, has_font=False):
     """La costura (spec §3): classify_region es EL árbitro. El corte 0.65
     vive DENTRO de fontid (label 'type' ya lo implica). Política
-    provisional con evidencia N=1 — declarada, no escondida."""
+    provisional con evidencia N=1 — declarada, no escondida.
+
+    has_font=True: --font explícito para esta región → recompone aunque
+    el ranking esté vacío (offline sovereignty, HF2)."""
     if region.classification != "type":
         return SeamDecision(False, f"clasificada {region.classification} "
                                    f"(score {region.class_score:.2f})")
-    if not region.ranking:
-        return SeamDecision(False, "type sin ranking (conteo glifos≠chars "
-                                   "o pool vacío) — se vectoriza")
-    return SeamDecision(True, f"type (score {region.class_score:.2f})")
+    if has_font or region.ranking:
+        return SeamDecision(True, f"type (score {region.class_score:.2f})")
+    return SeamDecision(False, "type pero sin fuente: ni --font ni ranking "
+                               "(¿red caída?)")
 
 
 def print_seam_report(regions, decisions):
@@ -347,7 +350,16 @@ def main():
         print("Para vectorización pura usa: python vectorize.py", args.input)
         raise SystemExit(EXIT_NADA_QUE_RECOMPONER)
 
-    decisions = [seam_decision(r) for r in regions]
+    # resolve choices ANTES de decisions: --font habilita recomposición
+    # aunque el ranking esté vacío (offline sovereignty, HF2)
+    try:
+        choices = resolve_font_choices(args.font, regions)
+    except (ValueError, FontKeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(EXIT_FONT_KEY)
+
+    decisions = [seam_decision(r, has_font=(i in choices))
+                 for i, r in enumerate(regions)]
     print_seam_report(regions, decisions)
 
     recomp_idx = [i for i, d in enumerate(decisions) if d.recompose]
@@ -355,12 +367,6 @@ def main():
         print("\nNinguna región supera la costura — nada que recomponer.")
         print("Para vectorización pura usa: python vectorize.py", args.input)
         raise SystemExit(EXIT_NADA_QUE_RECOMPONER)
-
-    try:
-        choices = resolve_font_choices(args.font, regions)
-    except (ValueError, FontKeyError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        raise SystemExit(EXIT_FONT_KEY)
 
     # --font sobre región que la costura no recompone: avisar, jamás tragar
     ignoradas = [i for i in choices if i not in recomp_idx]

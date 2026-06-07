@@ -368,3 +368,32 @@ def test_main_guard_ultima_sentencia():
     tree = ast.parse(src.read_text(encoding="utf-8"))
     ultimo = tree.body[-1]
     assert isinstance(ultimo, ast.If) and ultimo.test.left.id == "__name__"
+
+
+# ── HF2: --font desacopla recomposición del ranking (offline sovereignty) ──
+
+def test_seam_type_con_font_recompone_sin_ranking():
+    """has_font=True fuerza recomposición aunque ranking esté vacío."""
+    r = _region(classification="type", ranking=[])
+    assert recompose.seam_decision(r, has_font=True).recompose is True
+
+
+def test_main_type_sin_fuente_sin_font_exit2(monkeypatch, tmp_path, capsys):
+    """type + sin ranking + sin --font → nada que recomponer (EXIT 2), reporta 'sin fuente'."""
+    regs = [_region(text="abc", classification="type", ranking=[])]
+    code, _ = _main_con(monkeypatch, tmp_path, regs)
+    assert code == recompose.EXIT_NADA_QUE_RECOMPONER
+    assert "sin fuente" in capsys.readouterr().out
+
+
+def test_main_font_offline_recompone_sin_ranking(monkeypatch, tmp_path):
+    """Red caída (ranking vacío) + --font explícito → recompone igual. Antes EXIT 2."""
+    regs = [_region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3,
+                    classification="type", ranking=[])]
+    cache = Path.home() / ".cache" / "vectorizer-fonts"
+    if not (cache / "Cormorant_Garamond_500.ttf").exists():
+        pytest.skip("TTF de caché no disponible")
+    code, src = _main_con(monkeypatch, tmp_path, regs,
+                          argv_extra=["--font", "abc=Cormorant Garamond:500"])
+    assert code == 0
+    assert src.with_name("logo_recompuesto.svg").exists()
