@@ -135,3 +135,29 @@ def test_region_glyph_paths_con_ttf_real():
     assert len(pairs) == 5
     for d, tr in pairs:
         assert d and tr.startswith("translate(")
+
+
+# ── resolución de TTF (spec §5: cualquier familia GF, on-demand) ────
+
+def test_resolve_ttf_cache_hit(tmp_path):
+    (tmp_path / "Mi_Fuente_400.ttf").write_bytes(b"x")
+    p = recompose.resolve_ttf("Mi Fuente", 400, tmp_path)
+    assert p.name == "Mi_Fuente_400.ttf"
+
+
+def test_resolve_ttf_descarga_on_demand(tmp_path, monkeypatch):
+    target = tmp_path / "Otra_500.ttf"
+    monkeypatch.setattr(recompose, "download_family_weights",
+                        lambda fam, cd: [(400, tmp_path / "Otra_400.ttf"),
+                                         (500, target)])
+    assert recompose.resolve_ttf("Otra", 500, tmp_path) == target
+
+
+def test_resolve_ttf_peso_inexistente_error_duro(tmp_path, monkeypatch):
+    """--font explícito con peso no disponible: JAMÁS sustituir la
+    decisión del ojo en silencio (spec §7)."""
+    monkeypatch.setattr(recompose, "download_family_weights",
+                        lambda fam, cd: [(400, tmp_path / "Otra_400.ttf")])
+    with pytest.raises(recompose.FontKeyError) as e:
+        recompose.resolve_ttf("Otra", 900, tmp_path)
+    assert "900" in str(e.value) and "400" in str(e.value)

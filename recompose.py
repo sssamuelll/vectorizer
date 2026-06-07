@@ -167,6 +167,24 @@ def region_glyph_paths(ttf_path, chars, glyph_boxes):
     return out
 
 
+def resolve_ttf(family, wght, cache_dir):
+    """TTF de familia:peso — caché primero, descarga on-demand después.
+    La familia puede NO estar en el ranking (regla de soberanía: el ojo
+    elige fuera del menú — caso Nanum Myeongjo). Peso inexistente →
+    FontKeyError con los disponibles."""
+    cache_dir = Path(cache_dir)
+    cached = cache_dir / f"{family.replace(' ', '_')}_{wght}.ttf"
+    if cached.exists():
+        return cached
+    weights = download_family_weights(family, cache_dir)
+    for w, path in weights:
+        if w == wght:
+            return path
+    disponibles = sorted(w for w, _ in weights) or "ninguno (¿red caída o familia inexistente en GF?)"
+    raise FontKeyError(
+        f"peso {wght} no disponible para {family!r}; disponibles: {disponibles}")
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")  # cp1252 crashea con Δ/→
     raise SystemExit("recompose.py: implementación en progreso (Task 11)")
