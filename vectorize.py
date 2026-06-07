@@ -571,7 +571,8 @@ def vectorize(image_path, output_path=None,
               mode="contour",
               blur=3,
               rdp_epsilon=1.0, chaikin=2, tension=0.5,
-              stroke_width=2.0, auto_color=True, fallback_color="#1a1a1a"):
+              stroke_width=2.0, auto_color=True, fallback_color="#1a1a1a",
+              contour_sigma=0.0):
     """Vectorize a handwriting image to SVG.
 
     mode:
@@ -625,6 +626,7 @@ def vectorize(image_path, output_path=None,
             rdp_eps=max(0.5, rdp_epsilon * 0.75),
             chaikin_iter=max(1, chaikin - 1),
             tension=tension,
+            sigma=contour_sigma,
         )
     if mode in ("skeleton", "both"):
         skeleton_paths = _build_skeleton_paths(
@@ -690,6 +692,9 @@ def build_parser():
     parser.add_argument("--tension", type=float, default=0.5)
     parser.add_argument("--width", type=float, default=2.0,
                         help="Stroke width for skeleton mode")
+    parser.add_argument("--contour-sigma", type=float, default=0.0,
+                        help="Filtro gaussiano de puntos de contorno antes del "
+                             "RDP (0 = off; 2.0 = suavizado de calibración)")
     parser.add_argument("--color", default=None,
                         help="Forzar color hex del trazo (solo handwriting; "
                              "no confundir con --colors, que es del modo color)")
@@ -716,7 +721,7 @@ def build_parser():
 
 _HANDWRITING_FLAG_DEFAULTS = {
     "blur": 3, "rdp": 1.0, "chaikin": 2, "tension": 0.5,
-    "width": 2.0, "color": None, "no_auto_color": False,
+    "width": 2.0, "contour_sigma": 0.0, "color": None, "no_auto_color": False,
 }
 _COLOR_FLAG_DEFAULTS = {
     "preset": None, "colors": None, "speckle": None,
@@ -761,7 +766,8 @@ def main():
         common = dict(
             mode=args.mode, blur=args.blur,
             rdp_epsilon=args.rdp, chaikin=args.chaikin, tension=args.tension,
-            stroke_width=args.width, auto_color=not args.no_auto_color,
+            stroke_width=args.width, contour_sigma=args.contour_sigma,
+            auto_color=not args.no_auto_color,
             fallback_color=args.color or "#1a1a1a",
         )
 

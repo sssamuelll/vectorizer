@@ -333,3 +333,31 @@ def test_batch_continues_after_corrupt_file(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "1 OK" in out
     assert "1 fallos" in out
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ── CLI: --contour-sigma (Task 3) ──────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+
+def test_cli_contour_sigma_default_cero():
+    args = vz.build_parser().parse_args(["x.png"])
+    assert args.contour_sigma == 0.0
+
+
+def test_contour_sigma_inerte_en_modo_color(capsys):
+    args = vz.build_parser().parse_args(
+        ["x.png", "--mode", "color", "--contour-sigma", "2"])
+    vz.warn_inert_flags(args)
+    assert "--contour-sigma no aplica" in capsys.readouterr().out
+
+
+def test_vectorize_acepta_contour_sigma(tmp_path):
+    """vectorize() acepta contour_sigma y produce SVG válido."""
+    img = np.full((120, 120, 3), 255, np.uint8)
+    cv2.circle(img, (60, 60), 35, (40, 40, 40), -1)
+    src = tmp_path / "in.png"
+    cv2.imwrite(str(src), img)
+    out = vz.vectorize(str(src), output_path=str(tmp_path / "o.svg"),
+                       contour_sigma=2.0)
+    root = ET.parse(out).getroot()
+    assert root.tag.endswith("svg")
