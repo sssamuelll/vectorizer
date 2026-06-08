@@ -1,9 +1,12 @@
 """Tests del server FastAPI (Spec B1)."""
+import dataclasses
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import fontid
 import server.app as srv
+import server.models as models
 
 
 def test_store_put_get_roundtrip():
@@ -31,3 +34,23 @@ def test_store_put_ids_distintos():
     b = srv._put(srv.Session(object(), [], 1, 1))
     assert a != b
     srv._clear()
+
+
+def test_rankentry_dto_isomorfismo():
+    """RankEntry mapea 1:1 a RankEntryDTO — si la dataclass gana un campo, falla."""
+    dc = {f.name for f in dataclasses.fields(fontid.RankEntry)}
+    dto = set(models.RankEntryDTO.model_fields)
+    assert dc == dto, f"RankEntry vs DTO divergen: {dc ^ dto}"
+
+
+def test_region_dto_isomorfismo():
+    """Cada campo de RegionAnalysis está MAPEADO al DTO o EXCLUIDO-con-razón.
+    Un campo nuevo no clasificado rompe el test (cierra el salto dataclass→wire)."""
+    dc = {f.name for f in dataclasses.fields(fontid.RegionAnalysis)}
+    MAPEADO = {"bbox", "text", "classification", "class_score"}   # → bbox/text/classification/classScore
+    EXCLUIDO = {
+        "glyph_boxes",   # interno: el server compone server-side, no va al wire
+        "ranking",       # derivado a decision/candidates/chosen (no se manda crudo)
+    }
+    sin_clasificar = dc - (MAPEADO | EXCLUIDO)
+    assert not sin_clasificar, f"campos de RegionAnalysis sin decidir para el wire: {sin_clasificar}"
