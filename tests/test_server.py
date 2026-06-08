@@ -54,3 +54,18 @@ def test_region_dto_isomorfismo():
     }
     sin_clasificar = dc - (MAPEADO | EXCLUIDO)
     assert not sin_clasificar, f"campos de RegionAnalysis sin decidir para el wire: {sin_clasificar}"
+
+
+def test_region_dto_preserva_valores_y_rename():
+    """class_score (dataclass) → classScore (DTO) y aridad de bbox, vía round-trip
+    JSON. Cierra el agujero del rename: el isomorfismo de NOMBRES no verifica que
+    el valor aterrice en el campo renombrado (la crítica de Richter)."""
+    r = fontid.RegionAnalysis(
+        bbox=(1, 2, 3, 4), text="mente", classification="type",
+        class_score=0.9, glyph_boxes=[], ranking=[])
+    dto = models.RegionDTO(
+        index=0, bbox=r.bbox, text=r.text, classification=r.classification,
+        classScore=r.class_score, decision="no_font", reason="sin ranking")
+    back = models.RegionDTO.model_validate_json(dto.model_dump_json())
+    assert back.classScore == r.class_score      # el rename aterriza CON el valor
+    assert back.bbox == (1, 2, 3, 4)             # tupla de aridad fija sobrevive JSON

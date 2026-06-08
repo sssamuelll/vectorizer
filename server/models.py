@@ -4,7 +4,9 @@ Derivados de las dataclasses RegionAnalysis/RankEntry de fontid; el test de
 isomorfismo (tests/test_server.py) vigila que un campo nuevo de la dataclass se
 decida explícitamente (mapeado o excluido), no que derive en silencio.
 """
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RankEntryDTO(BaseModel):
@@ -15,6 +17,7 @@ class RankEntryDTO(BaseModel):
 
 
 class ChoiceDTO(BaseModel):
+    model_config = ConfigDict(extra="forbid")   # el wire no acepta campos extra (typos)
     family: str
     wght: int
 
@@ -25,7 +28,7 @@ class RegionDTO(BaseModel):
     text: str
     classification: str
     classScore: float
-    decision: str                              # tie | leader | no_font | vectorized
+    decision: Literal["tie", "leader", "no_font", "vectorized"]
     candidates: list[RankEntryDTO] | None = None   # solo decision=="tie"
     chosen: ChoiceDTO | None = None                # solo decision=="leader"
     reason: str | None = None                      # no_font / vectorized
@@ -40,8 +43,9 @@ class AnalyzeResponse(BaseModel):
 
 
 class ComposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     imageId: str
-    choices: dict[str, ChoiceDTO] = {}
+    choices: dict[str, ChoiceDTO] = Field(default_factory=dict)
     contourSigma: float = 2.0
 
 
@@ -53,4 +57,11 @@ class IndexText(BaseModel):
 class ComposeResponse(BaseModel):
     svg: str
     provenance: list[str]
-    ignoradas: list[IndexText] = []
+    ignoradas: list[IndexText] = Field(default_factory=list)
+
+
+class ErrorResponse(BaseModel):
+    """Cuerpo de error tipado en el OpenAPI (spec §6). Viaja dentro del envelope
+    `{"detail": ...}` de FastAPI; `pendientes` solo en el 400 de empate."""
+    error: str
+    pendientes: list[IndexText] | None = None
