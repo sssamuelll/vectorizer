@@ -11,18 +11,16 @@ Superficie de import CERRADA (test AST la vigila):
   vectorize:      load_image_bgr, count_effective_colors
 """
 import argparse
-import hashlib
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError, binary_ink_mask,
-                            calligraphy_paths, compose_svg, region_glyph_paths,
-                            resolve_ttf, seam_decision)
+from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError,
+                            compose_hybrid_svg, seam_decision)
 from fontid import CACHE_DIR_DEFAULT, analyze_regions
-from vectorize import count_effective_colors, extract_stroke_color, load_image_bgr
+from vectorize import count_effective_colors, load_image_bgr
 
 # exit codes (spec §7) — CLI-only
 EXIT_NADA_QUE_RECOMPONER = 2
@@ -243,45 +241,26 @@ def main():
                       f'  # overlap {e.score:.3f}{marca}')
         raise SystemExit(EXIT_EMPATE_PENDIENTE)
 
-    # compositor
+    # compositor (cableado en el core — dueño único)
     cache_dir = Path(args.cache_dir)
-    glyph_pairs = []
-    mask_boxes = []
-    final_choices = {}
-    provenance = []
-    for i in recomp_idx:
-        r = regions[i]
-        family, wght = choices[i]
-        try:
-            ttf = resolve_ttf(family, wght, cache_dir)
-        except FontKeyError as e:
-            print(f"error: {e}", file=sys.stderr)
-            raise SystemExit(EXIT_FONT_KEY)
-        sha = hashlib.sha256(ttf.read_bytes()).hexdigest()[:16]
-        provenance.append(f"{family}:{wght} sha256:{sha}")
-        chars = [c for c in r.text if not c.isspace()]
-        try:
-            glyph_pairs.extend(
-                region_glyph_paths(ttf, chars, r.glyph_boxes, family))
-        except FontKeyError as e:
-            print(f"error: {e}", file=sys.stderr)
-            raise SystemExit(EXIT_FONT_KEY)
-        mask_boxes.append(r.bbox)
-        final_choices[i] = (family, wght)
-
-    callig = calligraphy_paths(img, mask_boxes, sigma=args.contour_sigma)
-    ink = extract_stroke_color(img, binary_ink_mask(img))
-    svg_text = compose_svg(w, h, ink, callig, glyph_pairs, provenance=provenance)
+    try:
+        res = compose_hybrid_svg(img, regions, choices, recomp_idx,
+                                 args.contour_sigma, cache_dir)
+    except FontKeyError as e:
+        print(f"error: {e}", file=sys.stderr)
+        raise SystemExit(EXIT_FONT_KEY)
+    svg_text = res.svg_text
+    final_choices = {i: choices[i] for i in recomp_idx}
 
     out_path = (Path(args.output) if args.output
                 else Path(args.input).with_name(
                     Path(args.input).stem + "_recompuesto.svg"))
     out_path.write_text(svg_text, encoding="utf-8")
     print(f"\n  [OK] SVG híbrido: {out_path}")
-    print(f"       Tinta: {ink} | caligrafía: {len(callig)} contornos | "
-          f"glifos: {len(glyph_pairs)}")
+    print(f"       Tinta: {res.ink} | caligrafía: {res.callig_count} contornos | "
+          f"glifos: {res.glyph_count}")
 
-    preview = write_preview(img, svg_text, mask_boxes,
+    preview = write_preview(img, svg_text, res.mask_boxes,
                             out_path.with_name(out_path.stem + "_preview.png"))
     if preview:
         print(f"     Preview: {preview}")
