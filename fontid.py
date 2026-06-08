@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -228,6 +229,26 @@ def validate_ttf(path):
     return True
 
 
+def _atomic_write(dest, data, validate=None):
+    """Promueve `data` a `dest` atómicamente vía tempfile ÚNICO en el mismo
+    directorio (seguro bajo concurrencia: cada escritor tiene su propio .tmp,
+    sin colisión de nombre). `validate(tmp_path)->bool`; si False, no promueve.
+    Devuelve True si `dest` quedó escrito."""
+    dest = Path(dest)
+    with tempfile.NamedTemporaryFile(dir=str(dest.parent), suffix=".tmp",
+                                     delete=False) as tf:
+        tf.write(data)
+        tmp = Path(tf.name)
+    try:
+        if validate is not None and not validate(tmp):
+            return False
+        os.replace(tmp, dest)
+        return True
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
 def download_ttf(family, cache_dir):
     """Descarga el TTF regular de una familia GF a la caché.
 
@@ -248,15 +269,9 @@ def download_ttf(family, cache_dir):
         data = urllib.request.urlopen(m.group(1), timeout=30).read()
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
-    # .tmp por familia: seguro solo en single-process (hecho runtime 7 del
-    # spec: OCR/spike secuencial). Si Fase A paraleliza, usar tempfile único.
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_bytes(data)
-    if not validate_ttf(tmp):
-        tmp.unlink(missing_ok=True)
-        return None
-    os.replace(tmp, dest)  # escritura atómica (spec)
-    return dest
+    if _atomic_write(dest, data, validate_ttf):
+        return dest
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -285,16 +300,13 @@ def fetch_metadata(cache_dir):
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     dest = cache_dir / "metadata.json"
-    tmp = dest.parent / (dest.name + ".tmp")
     fresh = dest.exists() and (time.time() - dest.stat().st_mtime) < METADATA_TTL_S
     if not fresh:
         try:
             raw = urllib.request.urlopen(GF_METADATA_URL, timeout=30).read()
-            tmp.write_bytes(raw)
-            json.loads(raw.decode("utf-8"))     # valida antes de promover
-            os.replace(tmp, dest)
+            json.loads(raw.decode("utf-8"))     # valida; ValueError cae al except
+            _atomic_write(dest, raw)
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
-            tmp.unlink(missing_ok=True)
             if not dest.exists():
                 raise RuntimeError(
                     "No se pudo descargar la metadata de Google Fonts y no hay "
@@ -368,12 +380,8 @@ def download_family_weights(family, cache_dir):
                 data = urllib.request.urlopen(ttf_url, timeout=30).read()
             except (urllib.error.URLError, TimeoutError, OSError):
                 continue
-            tmp = dest.parent / (dest.name + ".tmp")
-            tmp.write_bytes(data)
-            if not validate_ttf(tmp):
-                tmp.unlink(missing_ok=True)
+            if not _atomic_write(dest, data, validate_ttf):
                 continue
-            os.replace(tmp, dest)
         out.append((wght, dest))
     return out
 
