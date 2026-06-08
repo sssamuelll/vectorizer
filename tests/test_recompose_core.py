@@ -22,10 +22,6 @@ def _region(text="mente", bbox=(10, 10, 100, 40), classification="type",
         class_score=score, glyph_boxes=boxes, ranking=ranking or [])
 
 
-def _rank(*tuples):
-    return [fontid.RankEntry(f, w, s, t) for f, w, s, t in tuples]
-
-
 def _logo_sintetico():
     img = np.full((120, 300, 3), 255, np.uint8)
     cv2.ellipse(img, (150, 30), (100, 15), 0, 0, 360, (60, 110, 90), 6)
@@ -66,13 +62,12 @@ def test_glyph_transform_alinea_centro_y_fondo():
 # ── compose_hybrid_svg (dueño del cableado) ─────────────────────────
 
 @pytest.mark.skipif(not TTF_TEST.exists(), reason="TTF de caché no disponible")
-def test_compose_hybrid_svg_reproduce_el_inline():
-    """compose_hybrid_svg produce el mismo SVG que el cableado inline del CLI
-    para una región type con líder — gate del levantamiento (Spec A §3)."""
+def test_compose_hybrid_svg_region_type_estructura():
+    """compose_hybrid_svg sobre una región type: SVG con grupos ink+type,
+    conteo de glifos, bbox de máscara y provenance con sha. La byte-identidad
+    contra el inline se verifica en Task 3 (gate de aceptación), no aquí."""
     img = _logo_sintetico()
-    r = _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3,
-                classification="type",
-                ranking=_rank(("Cormorant Garamond", 500, 0.8, False)))
+    r = _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3)
     res = recompose_core.compose_hybrid_svg(
         img, [r], {0: ("Cormorant Garamond", 500)}, [0],
         sigma=2.0, cache_dir=CACHE)
