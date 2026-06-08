@@ -226,3 +226,36 @@ def test_compose_ignoradas_en_respuesta(monkeypatch):
                                              "choices": {"1": {"family": "Lora", "wght": 400}}})
     assert resp.status_code == 200
     assert resp.json()["ignoradas"] == [{"index": 1, "text": "libre"}]
+
+
+def test_compose_clave_unicode_digito_400():
+    """Clave dígito-unicode ('²'): isdigit() True pero int() lanzaría — debe ser 400, no 500."""
+    regions = [_region("abc", ranking=_rank(("Lora", 400, 0.8, False)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose",
+                       json={"imageId": sid, "choices": {"²": {"family": "Lora", "wght": 400}}})
+    assert resp.status_code == 400
+
+
+def test_compose_empate_con_eleccion_fluye_y_reenvia_sigma(monkeypatch):
+    """Región empate CON elección → 200: la elección resuelve el empate y llega a
+    compose_hybrid_svg, y contourSigma se reenvía (no se hardcodea)."""
+    from recompose_core import ComposeResult
+    regions = [_region("mente", ranking=_rank(("A", 500, 0.75, False), ("B", 400, 0.745, True)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    cap = {}
+
+    def fake_compose(img, regs, choices, recomp_idx, sigma, cache_dir):
+        cap["choices"] = dict(choices)
+        cap["sigma"] = sigma
+        return ComposeResult("<svg/>", "#000", 1, 3, [], [(0, 0, 100, 20)])
+
+    monkeypatch.setattr(srv, "compose_hybrid_svg", fake_compose)
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={
+        "imageId": sid, "choices": {"0": {"family": "Nanum Myeongjo", "wght": 400}},
+        "contourSigma": 3.5})
+    assert resp.status_code == 200
+    assert cap["choices"][0] == ("Nanum Myeongjo", 400)   # la elección llegó a compose
+    assert cap["sigma"] == 3.5                            # contourSigma se reenvía

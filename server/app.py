@@ -111,7 +111,9 @@ def compose(req: models.ComposeRequest):
         raise HTTPException(status_code=404, detail={"error": "imageId desconocido"})
     explicit = {}
     for k, v in req.choices.items():
-        if not k.isdigit() or not (0 <= int(k) < len(sess.regions)):
+        if (not (k.isascii() and k.isdigit())   # rechaza dígitos unicode ('²') antes de int()
+                or str(int(k)) != k              # rechaza claves no-canónicas ('00')
+                or not (0 <= int(k) < len(sess.regions))):
             raise HTTPException(status_code=400,
                                 detail={"error": f"índice de choices inválido: {k!r}"})
         explicit[int(k)] = (v.family, v.wght)
