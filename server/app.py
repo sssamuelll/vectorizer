@@ -8,8 +8,14 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+
+from fontid import analyze_regions
+from recompose_core import COLOR_WARN_THRESHOLD, seam_decision
+from vectorize import count_effective_colors, load_image_bgr_from_bytes
+
+from server import models
 
 
 # ── store inline (spec §2) ──────────────────────────────────────────
@@ -54,3 +60,44 @@ app = FastAPI(title="recompose", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["http://localhost:5173"],   # Vite dev (para C)
     allow_methods=["*"], allow_headers=["*"])
+
+
+def _decision(r):
+    """Deriva la vista de la región desde seam_decision + ranking (no es estado
+    nuevo). Devuelve (kind, band, chosen, reason)."""
+    d = seam_decision(r, has_font=False)
+    if not d.recompose:
+        kind = "vectorized" if r.classification != "type" else "no_font"
+        return kind, None, None, d.reason
+    empate = len(r.ranking) > 1 and r.ranking[1].tie
+    if empate:
+        band = ([r.ranking[0]] + [e for e in r.ranking[1:] if e.tie])[:4]
+        return "tie", band, None, None
+    return "leader", None, r.ranking[0], None
+
+
+@app.post("/api/analyze", response_model=models.AnalyzeResponse)
+def analyze(file: UploadFile = File(...)):
+    raster = load_image_bgr_from_bytes(file.file.read())
+    if raster is None:
+        raise HTTPException(status_code=415, detail={"error": "imagen vacía o ilegible"})
+    n = count_effective_colors(raster)
+    color_warning = (f"~{n} colores efectivos — recompose asume UNA tinta"
+                     if n > COLOR_WARN_THRESHOLD else None)
+    regions = analyze_regions(raster)
+    h, w = raster.shape[:2]
+    sid = _put(Session(raster, regions, w, h))
+    out = []
+    for i, r in enumerate(regions):
+        kind, band, chosen, reason = _decision(r)
+        out.append(models.RegionDTO(
+            index=i, bbox=tuple(int(v) for v in r.bbox), text=r.text,
+            classification=r.classification, classScore=float(r.class_score),
+            decision=kind, reason=reason,
+            candidates=([models.RankEntryDTO(family=e.family, wght=e.wght,
+                                             score=e.score, tie=e.tie) for e in band]
+                        if band else None),
+            chosen=(models.ChoiceDTO(family=chosen.family, wght=chosen.wght)
+                    if chosen else None)))
+    return models.AnalyzeResponse(imageId=sid, width=w, height=h,
+                                  colorWarning=color_warning, regions=out)

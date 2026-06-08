@@ -3,10 +3,28 @@ import dataclasses
 import sys
 from pathlib import Path
 
+import numpy as np
+from fastapi.testclient import TestClient
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import fontid
 import server.app as srv
 import server.models as models
+
+
+def _rank(*tuples):
+    return [fontid.RankEntry(f, w, s, t) for f, w, s, t in tuples]
+
+
+def _region(text, classification="type", score=0.9, ranking=None, n_glyphs=3):
+    boxes = [(i * 10, 0, i * 10 + 8, 20) for i in range(n_glyphs)]
+    return fontid.RegionAnalysis(bbox=(0, 0, 100, 20), text=text,
+                                 classification=classification, class_score=score,
+                                 glyph_boxes=boxes, ranking=ranking or [])
+
+
+def _dummy_raster():
+    return np.zeros((20, 100, 3), np.uint8)
 
 
 def test_store_put_get_roundtrip():
@@ -69,3 +87,43 @@ def test_region_dto_preserva_valores_y_rename():
     back = models.RegionDTO.model_validate_json(dto.model_dump_json())
     assert back.classScore == r.class_score      # el rename aterriza CON el valor
     assert back.bbox == (1, 2, 3, 4)             # tupla de aridad fija sobrevive JSON
+
+
+def test_analyze_deriva_las_4_decisiones(monkeypatch):
+    fake = [
+        _region("mente", ranking=_rank(("Cormorant Garamond", 500, 0.753, False),
+                                       ("Libre Baskerville", 400, 0.747, True))),   # tie
+        _region("abc", ranking=_rank(("Lora", 400, 0.80, False))),                  # leader
+        _region("libre", classification="handwriting", score=0.2),                  # vectorized
+        _region("xy", ranking=[]),                                                  # no_font
+    ]
+    monkeypatch.setattr(srv, "load_image_bgr_from_bytes", lambda d: _dummy_raster())
+    monkeypatch.setattr(srv, "count_effective_colors", lambda r: 3)
+    monkeypatch.setattr(srv, "analyze_regions", lambda r: fake)
+    client = TestClient(srv.app)
+    resp = client.post("/api/analyze", files={"file": ("x.png", b"data", "image/png")})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["colorWarning"] is None and len(body["imageId"]) >= 8
+    regs = body["regions"]
+    assert regs[0]["decision"] == "tie" and len(regs[0]["candidates"]) == 2
+    assert regs[1]["decision"] == "leader" and regs[1]["chosen"] == {"family": "Lora", "wght": 400}
+    assert regs[2]["decision"] == "vectorized" and regs[2]["candidates"] is None
+    assert regs[3]["decision"] == "no_font"
+    assert regs[1]["classScore"] == 0.9    # el rename class_score->classScore lleva el valor
+
+
+def test_analyze_ilegible_415(monkeypatch):
+    monkeypatch.setattr(srv, "load_image_bgr_from_bytes", lambda d: None)
+    client = TestClient(srv.app)
+    resp = client.post("/api/analyze", files={"file": ("x", b"basura", "application/octet-stream")})
+    assert resp.status_code == 415
+
+
+def test_decision_band_cap_4():
+    """La banda de empate se corta a 4 (líder + empatadas), no más."""
+    r = _region("mente", ranking=_rank(
+        ("A", 500, 0.80, False), ("B", 400, 0.79, True), ("C", 400, 0.785, True),
+        ("D", 400, 0.78, True), ("E", 400, 0.775, True)))
+    kind, band, chosen, reason = srv._decision(r)
+    assert kind == "tie" and len(band) == 4
