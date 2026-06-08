@@ -18,11 +18,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from recompose_core import (CALLIG_RDP, CALLIG_CHAIKIN, CALLIG_TENSION,
-                            COLOR_WARN_THRESHOLD, MASK_PAD, FontKeyError,
-                            SeamDecision, binary_ink_mask, calligraphy_paths,
-                            common_scale, compose_svg, glyph_transform,
-                            region_glyph_paths, resolve_ttf, seam_decision)
+from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError, binary_ink_mask,
+                            calligraphy_paths, compose_svg, region_glyph_paths,
+                            resolve_ttf, seam_decision)
 from fontid import CACHE_DIR_DEFAULT, analyze_regions
 from vectorize import count_effective_colors, extract_stroke_color, load_image_bgr
 

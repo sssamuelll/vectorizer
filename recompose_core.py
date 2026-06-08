@@ -8,7 +8,8 @@ desde TTF, caligrafía vectorizada, compositor SVG, y el cableado de compose
 Dependencia unidireccional: este módulo NO importa de recompose.py.
 Superficie de import CERRADA (test AST la vigila):
   fontid:    download_family_weights
-  vectorize: clean_binary_mask, extract_stroke_color, trace_contours
+  vectorize: clean_binary_mask, trace_contours
+  (extract_stroke_color entra con compose_hybrid_svg en Task 2)
 """
 import hashlib
 import xml.etree.ElementTree as ET
@@ -22,7 +23,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.ttLib import TTFont
 
 from fontid import download_family_weights
-from vectorize import clean_binary_mask, extract_stroke_color, trace_contours
+from vectorize import clean_binary_mask, trace_contours
 
 # precondición una tinta (spec §7)
 COLOR_WARN_THRESHOLD = 12
