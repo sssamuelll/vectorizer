@@ -215,9 +215,9 @@ class ComposeResult:
 @dataclass
 class ChoiceResolution:
     """Salida de resolve_choices — la política empate>líder>error con un solo dueño."""
-    effective: dict      # {idx: (family, wght)} — explícitas + relleno de líder
+    effective: dict      # {idx: (family, wght)} USABLES (explícitas∩recomp + relleno de líder; sin ignoradas)
     recomp_idx: list     # [idx] a recomponer
-    decisions: list      # [SeamDecision] por región (para el reporte de costura)
+    decisions: list      # [SeamDecision] por región — payload de reporte del CLI, NO del contrato de resolución
     pendientes: list     # [(idx, region)] empate sin elección
     ignoradas: list      # [idx] choices apuntando a región NO recompuesta
 
