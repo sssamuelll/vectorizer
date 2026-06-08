@@ -232,6 +232,8 @@ def _violaciones_de_superficie(filename, allow):
     src = (Path(__file__).resolve().parent.parent / filename)
     tree = ast.parse(src.read_text(encoding="utf-8"))
     out = []
+    # Asume imports absolutos planos (el repo no tiene paquetes; un
+    # `from . import X` sería SyntaxError). Cubre `from M import ...` e `import M`.
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module in allow:
             extra = {a.name for a in node.names} - allow[node.module]
