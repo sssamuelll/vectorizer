@@ -176,7 +176,6 @@ def main():
     img = load_image_bgr(args.input)
     if img is None:
         sys.exit(f"error: no se pudo cargar {args.input}")
-    h, w = img.shape[:2]
 
     n_colores = count_effective_colors(img)
     if n_colores > COLOR_WARN_THRESHOLD:

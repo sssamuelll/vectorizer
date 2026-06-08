@@ -156,7 +156,7 @@ def test_resolve_ttf_rechaza_familia_con_ruta(tmp_path, monkeypatch):
     monkeypatch.setattr(recompose_core, "download_family_weights",
                         lambda fam, cd: (calls.append(fam), [])[1])
     for malo in ("../evil", "a/b", "a\\b"):
-        with pytest.raises(recompose_core.FontKeyError) as exc:
+        with pytest.raises(recompose_core.FontKeyError):
             recompose_core.resolve_ttf(malo, 400, tmp_path)
         # Verificar que download NO se llamó.
         assert malo not in calls, \

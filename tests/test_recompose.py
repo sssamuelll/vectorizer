@@ -1,6 +1,5 @@
 """Tests de recompose.py (Fase B v0.1 — replay puro)."""
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -78,8 +77,6 @@ def test_reporte_costura_siempre_lista_todas(capsys):
     assert "mente" in out and "libre" in out
     assert "recompone" in out and "vectoriza" in out
 
-
-# ── caligrafía + composición ────────────────────────────────────────
 
 def _logo_sintetico():
     """120x300: un 'trazo caligráfico' (curva) arriba + una 'palabra'
