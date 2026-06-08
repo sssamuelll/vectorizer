@@ -1,6 +1,7 @@
 """Tests del server FastAPI (Spec B1)."""
 import dataclasses
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import fontid
 import server.app as srv
 import server.models as models
+
+CACHE = Path.home() / ".cache" / "vectorizer-fonts"
+TTF_TEST = CACHE / "Cormorant_Garamond_500.ttf"
 
 
 def _rank(*tuples):
@@ -288,3 +292,107 @@ def test_overlay_dtos_forma_y_extra_forbid():
     resp = models.OverlayResponse(glyphs=[models.GlyphPath(d="M0Z", transform="matrix(1)")])
     back = models.OverlayResponse.model_validate_json(resp.model_dump_json())
     assert back.glyphs[0].d == "M0Z" and back.glyphs[0].transform == "matrix(1)"
+
+
+def test_overlay_envuelve_region_overlay_paths(monkeypatch):
+    """El endpoint devuelve VERBATIM lo que region_overlay_paths produce. Junto al
+    test de fidelidad del core (overlay-paths == compose-type), esto prueba
+    transitivamente: /api/overlay == lo que /compose descarga."""
+    r = _region("abc", n_glyphs=3)
+    sid = srv._put(srv.Session(_dummy_raster(), [r], 100, 20))
+    monkeypatch.setattr(srv, "region_overlay_paths",
+                        lambda region, fam, w, cd: ([("M0Z", "matrix(1)"),
+                                                     ("M1Z", "matrix(2)")], "ttf"))
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": 0,
+                                             "family": "Whatever", "wght": 400})
+    assert resp.status_code == 200
+    assert resp.json()["glyphs"] == [{"d": "M0Z", "transform": "matrix(1)"},
+                                     {"d": "M1Z", "transform": "matrix(2)"}]
+    srv._clear()
+
+
+def test_overlay_404_imageid_desconocido():
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": "noexiste", "regionIndex": 0,
+                                             "family": "Lora", "wght": 400})
+    assert resp.status_code == 404 and resp.json()["detail"]["error"] == "imageId desconocido"
+
+
+def test_overlay_400_region_fuera_de_rango():
+    r = _region("abc", n_glyphs=3)
+    sid = srv._put(srv.Session(_dummy_raster(), [r], 100, 20))
+    client = TestClient(srv.app)
+    for idx in (-1, 5):
+        resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": idx,
+                                                 "family": "Lora", "wght": 400})
+        assert resp.status_code == 400
+    srv._clear()
+
+
+def test_overlay_400_region_no_tipografica():
+    """Región vectorized (handwriting) → 400: no hay texto tipográfico que pintar."""
+    r = _region("libre", classification="handwriting", score=0.2)
+    sid = srv._put(srv.Session(_dummy_raster(), [r], 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": 0,
+                                             "family": "Lora", "wght": 400})
+    assert resp.status_code == 400 and "tipográfic" in resp.json()["detail"]["error"]
+    srv._clear()
+
+
+def test_overlay_400_charcount_no_cuadra():
+    """Región type pero len(chars) != len(glyph_boxes) → 400 honesto, no un 500 de
+    region_glyph_paths (replica la precondición de la costura)."""
+    r = _region("abcd", n_glyphs=3)          # 4 chars, 3 boxes
+    sid = srv._put(srv.Session(_dummy_raster(), [r], 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": 0,
+                                             "family": "Lora", "wght": 400})
+    assert resp.status_code == 400
+    srv._clear()
+
+
+def test_overlay_422_fontkey(monkeypatch):
+    """familia/peso no resoluble → 422 (igual que /compose ante una fuente mala)."""
+    r = _region("abc", n_glyphs=3)
+    sid = srv._put(srv.Session(_dummy_raster(), [r], 100, 20))
+    monkeypatch.setattr(srv, "region_overlay_paths", _raise_fontkey)
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": 0,
+                                             "family": "Lora", "wght": 999})
+    assert resp.status_code == 422 and "999" in resp.json()["detail"]["error"]
+    srv._clear()
+
+
+def test_overlay_422_body_invalido():
+    """Campo extra en el body → 422 de Pydantic (extra=forbid)."""
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": "x", "regionIndex": 0,
+                                             "family": "Lora", "wght": 400, "z": 1})
+    assert resp.status_code == 422
+
+
+@pytest.mark.skipif(not TTF_TEST.exists(), reason="TTF de caché no disponible")
+def test_overlay_identico_a_compose_e2e():
+    """End-to-end servidor: /api/overlay == el <g class='type'> que compose produce
+    para la misma región+candidata. La aceptación dura de §6 sobre fuente real."""
+    from recompose_core import compose_hybrid_svg
+    img = np.full((120, 300, 3), 255, np.uint8)
+    img[60:115, 50:250] = (60, 110, 90)        # algo de tinta para la caligrafía
+    r = _region("abc", n_glyphs=3)
+    r = dataclasses.replace(r, bbox=(50, 60, 250, 115),
+                            glyph_boxes=[(50, 60, 110, 115), (115, 60, 175, 115),
+                                         (180, 60, 240, 115)])
+    sid = srv._put(srv.Session(img, [r], 300, 120))
+    client = TestClient(srv.app)
+    resp = client.post("/api/overlay", json={"imageId": sid, "regionIndex": 0,
+                                             "family": "Cormorant Garamond", "wght": 500})
+    assert resp.status_code == 200
+    overlay = [(g["d"], g["transform"]) for g in resp.json()["glyphs"]]
+    res = compose_hybrid_svg(img, [r], {0: ("Cormorant Garamond", 500)}, [0], 2.0, CACHE)
+    root = ET.fromstring(res.svg_text)
+    type_g = next(g for g in root if g.tag.endswith("g") and g.get("class") == "type")
+    compose_pairs = [(p.get("d"), p.get("transform")) for p in type_g]
+    assert overlay == compose_pairs and len(overlay) == 3
+    srv._clear()

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from fontid import analyze_regions, CACHE_DIR_DEFAULT
 from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError, compose_hybrid_svg,
-                            resolve_choices, seam_decision)
+                            region_overlay_paths, resolve_choices, seam_decision)
 from vectorize import count_effective_colors, load_image_bgr_from_bytes
 
 from server import models
@@ -138,3 +138,24 @@ def compose(req: models.ComposeRequest):
                  for i in resolved.ignoradas]
     return models.ComposeResponse(svg=res.svg_text, provenance=res.provenance,
                                   ignoradas=ignoradas)
+
+
+@app.post("/api/overlay", response_model=models.OverlayResponse)
+def overlay(req: models.OverlayRequest):
+    sess = _get(req.imageId)
+    if sess is None:
+        raise HTTPException(status_code=404, detail={"error": "imageId desconocido"})
+    if not (0 <= req.regionIndex < len(sess.regions)):
+        raise HTTPException(status_code=400,
+                            detail={"error": f"regionIndex fuera de rango: {req.regionIndex}"})
+    r = sess.regions[req.regionIndex]
+    chars = [c for c in r.text if not c.isspace()]
+    if r.classification != "type" or not r.glyph_boxes or len(chars) != len(r.glyph_boxes):
+        raise HTTPException(status_code=400,
+                            detail={"error": "región sin texto tipográfico"})
+    try:
+        pairs, _ = region_overlay_paths(r, req.family, req.wght, CACHE_DIR_DEFAULT)
+    except FontKeyError as e:
+        raise HTTPException(status_code=422, detail={"error": str(e)})
+    return models.OverlayResponse(
+        glyphs=[models.GlyphPath(d=d, transform=tr) for d, tr in pairs])
