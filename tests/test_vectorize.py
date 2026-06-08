@@ -361,3 +361,46 @@ def test_vectorize_acepta_contour_sigma(tmp_path):
                        contour_sigma=2.0)
     root = ET.parse(out).getroot()
     assert root.tag.endswith("svg")
+
+
+# ═══════════════════════════════════════════════════════════════════
+# load_image_bgr_from_bytes — byte-identidad path vs bytes
+# ═══════════════════════════════════════════════════════════════════
+
+def test_load_from_bytes_igual_que_path(tmp_path):
+    img = np.full((40, 60, 3), 200, np.uint8)
+    img[10:20, 10:20] = (30, 60, 90)
+    p = tmp_path / "x.png"
+    cv2.imwrite(str(p), img)
+    a = vz.load_image_bgr(p)
+    b = vz.load_image_bgr_from_bytes(p.read_bytes())
+    assert np.array_equal(a, b)
+
+
+def test_load_from_bytes_png_alpha(tmp_path):
+    """Política de alpha idéntica entre path y bytes (el caso que el draft tenía mal)."""
+    bgra = np.zeros((20, 20, 4), np.uint8)
+    bgra[..., :3] = (40, 80, 120)
+    bgra[..., 3] = 128                     # semi-transparente → compone sobre blanco
+    p = tmp_path / "a.png"
+    cv2.imwrite(str(p), bgra)
+    assert np.array_equal(vz.load_image_bgr(p),
+                          vz.load_image_bgr_from_bytes(p.read_bytes()))
+
+
+def test_load_from_bytes_jpeg_igual_que_path(tmp_path):
+    """JPEG (el formato del asset de aceptación): path↔bytes byte-idéntico."""
+    img = np.full((48, 64, 3), 180, np.uint8)
+    img[12:24, 16:40] = (40, 70, 110)
+    p = tmp_path / "x.jpg"
+    cv2.imwrite(str(p), img)
+    assert np.array_equal(vz.load_image_bgr(p),
+                          vz.load_image_bgr_from_bytes(p.read_bytes()))
+
+
+def test_load_from_bytes_vacio_o_none_es_none():
+    """Parte de upload vacía/None → None, no excepción (imdecode asierta sobre
+    buffer vacío; el guard lo filtra antes)."""
+    assert vz.load_image_bgr_from_bytes(b"") is None
+    assert vz.load_image_bgr_from_bytes(None) is None
+    assert vz.load_image_bgr_from_bytes(b"no soy una imagen") is None

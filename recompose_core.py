@@ -212,6 +212,40 @@ class ComposeResult:
     mask_boxes: list      # [bbox] de las regiones recompuestas
 
 
+@dataclass
+class ChoiceResolution:
+    """Salida de resolve_choices — la política empate>líder>error con un solo dueño."""
+    effective: dict      # {idx: (family, wght)} USABLES (explícitas∩recomp + relleno de líder; sin ignoradas)
+    recomp_idx: list     # [idx] a recomponer
+    decisions: list      # [SeamDecision] por región — payload de reporte del CLI, NO del contrato de resolución
+    pendientes: list     # [(idx, region)] empate sin elección
+    ignoradas: list      # [idx] choices apuntando a región NO recompuesta
+
+
+def resolve_choices(regions, choices):
+    """Política empate>líder>error, extraída verbatim de main() (recompose.py).
+    choices: {idx: (family, wght)} EXPLÍCITAS. has_font se evalúa contra las
+    explícitas (orden canónico de main), no contra el relleno. Función PURA: no
+    imprime — el orquestador presenta (CLI: stderr/exit; backend: HTTP)."""
+    decisions = [seam_decision(r, has_font=(i in choices))
+                 for i, r in enumerate(regions)]
+    recomp_idx = [i for i, d in enumerate(decisions) if d.recompose]
+    ignoradas = [i for i in choices if i not in recomp_idx]
+    effective = {i: v for i, v in choices.items() if i not in ignoradas}
+    pendientes = []
+    for i in recomp_idx:
+        if i in effective:
+            continue
+        r = regions[i]
+        lider = r.ranking[0]
+        empate = len(r.ranking) > 1 and r.ranking[1].tie
+        if empate:
+            pendientes.append((i, r))
+        else:
+            effective[i] = (lider.family, lider.wght)
+    return ChoiceResolution(effective, recomp_idx, decisions, pendientes, ignoradas)
+
+
 def compose_hybrid_svg(img_bgr, regions, choices, recomp_idx, sigma, cache_dir):
     """Cableado de compose compartido (CLI y backend). Dado choices YA resueltos
     {idx: (family, wght)} y los índices a recomponer, compone el SVG híbrido.

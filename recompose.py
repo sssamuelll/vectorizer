@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError,
-                            compose_hybrid_svg, seam_decision)
+                            compose_hybrid_svg, resolve_choices)
 from fontid import CACHE_DIR_DEFAULT, analyze_regions
 from vectorize import count_effective_colors, load_image_bgr
 
@@ -202,38 +202,23 @@ def main():
         print(f"error: {e}", file=sys.stderr)
         raise SystemExit(EXIT_FONT_KEY)
 
-    decisions = [seam_decision(r, has_font=(i in choices))
-                 for i, r in enumerate(regions)]
-    print_seam_report(regions, decisions)
+    resolved = resolve_choices(regions, choices)
+    print_seam_report(regions, resolved.decisions)
 
-    recomp_idx = [i for i, d in enumerate(decisions) if d.recompose]
-    if not recomp_idx:
+    if not resolved.recomp_idx:
         print("\nNinguna región supera la costura — nada que recomponer.")
         print("Para vectorización pura usa: python vectorize.py", args.input)
         raise SystemExit(EXIT_NADA_QUE_RECOMPONER)
 
     # --font sobre región que la costura no recompone: avisar, jamás tragar
-    ignoradas = [i for i in choices if i not in recomp_idx]
-    for i in ignoradas:
-        d = decisions[i]
+    for i in resolved.ignoradas:
+        d = resolved.decisions[i]
         print(f"  [WARN] --font para \"{regions[i].text}\" ignorado: "
               f"la región no se recompone ({d.reason})", file=sys.stderr)
 
-    # resolución por región: --font > líder sin empate > ERROR si empate
-    pendientes = []
-    for i in recomp_idx:
-        if i in choices:
-            continue
-        r = regions[i]
-        lider = r.ranking[0]
-        empate = len(r.ranking) > 1 and r.ranking[1].tie
-        if empate:
-            pendientes.append((i, r))
-        else:
-            choices[i] = (lider.family, lider.wght)
-    if pendientes:
+    if resolved.pendientes:
         print("\nEmpate sin decisión (Δ<0.03) — el replay exige --font:")
-        for i, r in pendientes:
+        for i, r in resolved.pendientes:
             for e in r.ranking[:4]:
                 marca = " (líder)" if e is r.ranking[0] else ""
                 print(f'  --font "{r.text}={e.family}:{e.wght}"'
@@ -243,13 +228,13 @@ def main():
     # compositor (cableado en el core — dueño único)
     cache_dir = Path(args.cache_dir)
     try:
-        res = compose_hybrid_svg(img, regions, choices, recomp_idx,
-                                 args.contour_sigma, cache_dir)
+        res = compose_hybrid_svg(img, regions, resolved.effective,
+                                 resolved.recomp_idx, args.contour_sigma, cache_dir)
     except FontKeyError as e:
         print(f"error: {e}", file=sys.stderr)
         raise SystemExit(EXIT_FONT_KEY)
     svg_text = res.svg_text
-    final_choices = {i: choices[i] for i in recomp_idx}
+    final_choices = {i: resolved.effective[i] for i in resolved.recomp_idx}
 
     out_path = (Path(args.output) if args.output
                 else Path(args.input).with_name(

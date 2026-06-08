@@ -548,3 +548,35 @@ def test_main_guard_is_last_statement():
     assert isinstance(last, ast.If), "el último statement no es el guard __main__"
     cond = ast.unparse(last.test)
     assert "__main__" in cond
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SPEC B0 — _atomic_write: temp único por escritura (concurrencia)
+# ═══════════════════════════════════════════════════════════════════
+
+def test_atomic_write_concurrente_no_corrompe(tmp_path):
+    """8 hilos escriben el MISMO destino: contenido íntegro, sin .tmp huérfano,
+    y ningún hilo perdedor lanza (la carrera se pierde con gracia en Windows)."""
+    import threading
+    dest = tmp_path / "fuente.bin"
+    data = b"A" * 200_000          # payload grande: la escritura no es instantánea
+    errores = []
+    def writer():
+        try:
+            fi._atomic_write(dest, data, validate=None)
+        except Exception as e:                       # noqa: BLE001
+            errores.append(repr(e))
+    ts = [threading.Thread(target=writer) for _ in range(8)]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    assert not errores, f"hilos perdedores lanzaron: {errores}"
+    assert dest.read_bytes() == data                 # ni truncado ni entrelazado
+    assert not list(tmp_path.glob("*.tmp"))          # sin temporal huérfano
+
+
+def test_atomic_write_validacion_falla_no_promueve(tmp_path):
+    dest = tmp_path / "f.bin"
+    ok = fi._atomic_write(dest, b"data", validate=lambda p: False)
+    assert ok is False
+    assert not dest.exists()
+    assert not list(tmp_path.glob("*.tmp"))

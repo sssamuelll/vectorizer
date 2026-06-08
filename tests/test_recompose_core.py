@@ -225,3 +225,64 @@ def test_compose_hybrid_svg_sin_regiones_solo_caligrafia():
     assert res.glyph_count == 0 and res.mask_boxes == []
     assert res.provenance == []
     ET.fromstring(res.svg_text)
+
+
+# ── resolve_choices: la política empate>líder>error (extraída de main) ──
+
+def test_resolve_choices_lider_sin_empate_rellena():
+    r = _region(text="abc", classification="type",
+                ranking=_rank(("Lora", 400, 0.80, False), ("PT Serif", 400, 0.60, False)))
+    res = recompose_core.resolve_choices([r], {})
+    assert res.recomp_idx == [0]
+    assert res.effective == {0: ("Lora", 400)}    # líder rellenado
+    assert res.pendientes == [] and res.ignoradas == []
+
+
+def test_resolve_choices_empate_queda_pendiente():
+    r = _region(text="mente", classification="type",
+                ranking=_rank(("Cormorant Garamond", 500, 0.753, False),
+                              ("Libre Baskerville", 400, 0.747, True)))
+    res = recompose_core.resolve_choices([r], {})
+    assert res.recomp_idx == [0]
+    assert 0 not in res.effective                 # no se rellena el empate
+    assert [i for i, _ in res.pendientes] == [0]
+
+
+def test_resolve_choices_explicita_gana():
+    r = _region(text="mente", classification="type",
+                ranking=_rank(("Cormorant Garamond", 500, 0.753, False),
+                              ("Libre Baskerville", 400, 0.747, True)))
+    res = recompose_core.resolve_choices([r], {0: ("Nanum Myeongjo", 400)})
+    assert res.effective == {0: ("Nanum Myeongjo", 400)}
+    assert res.pendientes == []                   # con elección no hay pendiente
+
+
+def test_resolve_choices_choice_sobre_handwriting_es_ignorada():
+    r = _region(text="libre", classification="handwriting", score=0.2)
+    res = recompose_core.resolve_choices([r], {0: ("Lora", 400)})
+    assert res.recomp_idx == []                   # handwriting no recompone
+    assert res.ignoradas == [0]                   # la elección queda registrada como ignorada
+    assert 0 not in res.effective
+
+
+def test_resolve_choices_type_sin_ranking_sin_font_no_recompone():
+    r = _region(text="abc", classification="type", ranking=[])
+    res = recompose_core.resolve_choices([r], {})
+    assert res.recomp_idx == [] and res.pendientes == []
+
+
+def test_resolve_choices_multiregion_indexa_correcto():
+    """Lote mixto: los índices de recomp_idx/ignoradas/pendientes/effective son
+    correctos a través de regiones distintas — blinda el contrato de índices del
+    que depende la byte-identidad de main() (Task 2)."""
+    r0 = _region(text="abc", classification="type",
+                 ranking=_rank(("Lora", 400, 0.80, False), ("PT Serif", 400, 0.60, False)))
+    r1 = _region(text="libre", classification="handwriting", score=0.2)
+    r2 = _region(text="mente", classification="type",
+                 ranking=_rank(("Cormorant Garamond", 500, 0.753, False),
+                               ("Libre Baskerville", 400, 0.747, True)))
+    res = recompose_core.resolve_choices([r0, r1, r2], {1: ("Lora", 400)})
+    assert res.recomp_idx == [0, 2]           # r0 líder, r2 empate; r1 handwriting fuera
+    assert res.ignoradas == [1]               # choice sobre handwriting
+    assert [i for i, _ in res.pendientes] == [2]
+    assert res.effective == {0: ("Lora", 400)}  # líder de r0; r2 pendiente; 1 excluida
