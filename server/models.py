@@ -65,3 +65,22 @@ class ErrorResponse(BaseModel):
     `{"detail": ...}` de FastAPI; `pendientes` solo en el 400 de empate."""
     error: str
     pendientes: list[IndexText] | None = None
+
+
+class OverlayRequest(BaseModel):
+    """Pide la geometría de UNA candidata sobre UNA región (Spec C0). family/wght
+    pueden ser cualquiera (la escotilla 'otra familia' elige fuera del menú)."""
+    model_config = ConfigDict(extra="forbid")
+    imageId: str
+    regionIndex: int
+    family: str
+    wght: int
+
+
+class GlyphPath(BaseModel):
+    d: str
+    transform: str
+
+
+class OverlayResponse(BaseModel):
+    glyphs: list[GlyphPath]

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -274,3 +275,16 @@ def test_compose_empate_con_eleccion_fluye_y_reenvia_sigma(monkeypatch):
     assert resp.status_code == 200
     assert cap["choices"][0] == ("Nanum Myeongjo", 400)   # la elección llegó a compose
     assert cap["sigma"] == 3.5                            # contourSigma se reenvía
+
+
+def test_overlay_dtos_forma_y_extra_forbid():
+    """OverlayRequest rechaza campos extra; GlyphPath/OverlayResponse hacen round-trip."""
+    import pydantic
+    req = models.OverlayRequest(imageId="abc", regionIndex=0, family="Lora", wght=400)
+    assert req.regionIndex == 0 and req.wght == 400
+    with pytest.raises(pydantic.ValidationError):
+        models.OverlayRequest(imageId="abc", regionIndex=0, family="Lora",
+                              wght=400, extra="no")          # extra=forbid
+    resp = models.OverlayResponse(glyphs=[models.GlyphPath(d="M0Z", transform="matrix(1)")])
+    back = models.OverlayResponse.model_validate_json(resp.model_dump_json())
+    assert back.glyphs[0].d == "M0Z" and back.glyphs[0].transform == "matrix(1)"
