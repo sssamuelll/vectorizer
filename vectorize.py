@@ -54,8 +54,12 @@ def load_image_bgr(image_path):
 
 def load_image_bgr_from_bytes(data):
     """Decodifica bytes (upload multipart) con la MISMA política que load_image_bgr.
-    Medido byte-idéntico a load_image_bgr(path) para PNG/JPEG/EXIF/alpha
-    (IMREAD_UNCHANGED ignora EXIF en imread e imdecode por igual)."""
+    Byte-idéntico a load_image_bgr(path) POR CONSTRUCCIÓN: IMREAD_UNCHANGED no
+    aplica EXIF ni en imread ni en imdecode, y la post-proc es compartida
+    (verificado en tests para PNG/JPEG/alpha). Bytes vacíos/None/ilegibles → None
+    (imdecode asierta sobre buffer vacío, así que se filtran antes)."""
+    if not data:
+        return None
     arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
     return _bgr_from_decoded(arr)
 

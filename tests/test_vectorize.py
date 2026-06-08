@@ -386,3 +386,21 @@ def test_load_from_bytes_png_alpha(tmp_path):
     cv2.imwrite(str(p), bgra)
     assert np.array_equal(vz.load_image_bgr(p),
                           vz.load_image_bgr_from_bytes(p.read_bytes()))
+
+
+def test_load_from_bytes_jpeg_igual_que_path(tmp_path):
+    """JPEG (el formato del asset de aceptación): path↔bytes byte-idéntico."""
+    img = np.full((48, 64, 3), 180, np.uint8)
+    img[12:24, 16:40] = (40, 70, 110)
+    p = tmp_path / "x.jpg"
+    cv2.imwrite(str(p), img)
+    assert np.array_equal(vz.load_image_bgr(p),
+                          vz.load_image_bgr_from_bytes(p.read_bytes()))
+
+
+def test_load_from_bytes_vacio_o_none_es_none():
+    """Parte de upload vacía/None → None, no excepción (imdecode asierta sobre
+    buffer vacío; el guard lo filtra antes)."""
+    assert vz.load_image_bgr_from_bytes(b"") is None
+    assert vz.load_image_bgr_from_bytes(None) is None
+    assert vz.load_image_bgr_from_bytes(b"no soy una imagen") is None
