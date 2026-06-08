@@ -9,6 +9,11 @@ export function Dropzone({ onUpload }: { onUpload: (f: File) => void }) {
       <p className="sub">Una imagen de un logo de una sola tinta. La vectorizamos, encontramos el texto y lo rehacemos con la fuente real.</p>
       <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => pick(e.target.files)} />
       <button className="btn" onClick={() => ref.current?.click()}>Elegir imagen…</button>
+      <div className="specs">
+        <span>PNG · JPG · WebP · TIFF</span>
+        <span>una sola tinta</span>
+        <span>se queda en tu máquina</span>
+      </div>
     </div>
   )
 }
