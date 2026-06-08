@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from fontid import analyze_regions
-from recompose_core import COLOR_WARN_THRESHOLD, seam_decision
+from fontid import analyze_regions, CACHE_DIR_DEFAULT
+from recompose_core import (COLOR_WARN_THRESHOLD, FontKeyError, compose_hybrid_svg,
+                            resolve_choices, seam_decision)
 from vectorize import count_effective_colors, load_image_bgr_from_bytes
 
 from server import models
@@ -101,3 +102,32 @@ def analyze(file: UploadFile = File(...)):
                     if chosen else None)))
     return models.AnalyzeResponse(imageId=sid, width=w, height=h,
                                   colorWarning=color_warning, regions=out)
+
+
+@app.post("/api/compose", response_model=models.ComposeResponse)
+def compose(req: models.ComposeRequest):
+    sess = _get(req.imageId)
+    if sess is None:
+        raise HTTPException(status_code=404, detail={"error": "imageId desconocido"})
+    explicit = {}
+    for k, v in req.choices.items():
+        if not k.isdigit() or not (0 <= int(k) < len(sess.regions)):
+            raise HTTPException(status_code=400,
+                                detail={"error": f"índice de choices inválido: {k!r}"})
+        explicit[int(k)] = (v.family, v.wght)
+    resolved = resolve_choices(sess.regions, explicit)
+    if not resolved.recomp_idx:
+        raise HTTPException(status_code=422, detail={"error": "nada que recomponer"})
+    if resolved.pendientes:
+        raise HTTPException(status_code=400, detail={
+            "error": "empate sin elección",
+            "pendientes": [{"index": i, "text": r.text} for i, r in resolved.pendientes]})
+    try:
+        res = compose_hybrid_svg(sess.raster, sess.regions, resolved.effective,
+                                 resolved.recomp_idx, req.contourSigma, CACHE_DIR_DEFAULT)
+    except FontKeyError as e:
+        raise HTTPException(status_code=422, detail={"error": str(e)})
+    ignoradas = [models.IndexText(index=i, text=sess.regions[i].text)
+                 for i in resolved.ignoradas]
+    return models.ComposeResponse(svg=res.svg_text, provenance=res.provenance,
+                                  ignoradas=ignoradas)

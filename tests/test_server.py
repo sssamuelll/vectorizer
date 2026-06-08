@@ -149,3 +149,80 @@ def test_analyze_colorwarning_presente(monkeypatch):
     assert resp.status_code == 200
     cw = resp.json()["colorWarning"]
     assert cw is not None and "20" in cw
+
+
+def _raise_fontkey(*a, **k):
+    raise srv.FontKeyError("peso 999 no disponible para 'Lora'; disponibles: [400]")
+
+
+def test_compose_404_imageid_desconocido():
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": "noexiste", "choices": {}})
+    assert resp.status_code == 404 and resp.json()["detail"]["error"] == "imageId desconocido"
+
+
+def test_compose_empate_sin_eleccion_400():
+    regions = [_region("mente", ranking=_rank(("A", 500, 0.75, False), ("B", 400, 0.745, True)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid, "choices": {}})
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["pendientes"][0]["index"] == 0
+
+
+def test_compose_nada_que_recomponer_422():
+    regions = [_region("libre", classification="handwriting", score=0.2)]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid, "choices": {}})
+    assert resp.status_code == 422
+
+
+def test_compose_clave_fuera_de_rango_400():
+    regions = [_region("abc", ranking=_rank(("Lora", 400, 0.8, False)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid,
+                                             "choices": {"7": {"family": "Lora", "wght": 400}}})
+    assert resp.status_code == 400
+
+
+def test_compose_fontkey_422(monkeypatch):
+    regions = [_region("abc", ranking=_rank(("Lora", 400, 0.8, False)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    monkeypatch.setattr(srv, "compose_hybrid_svg", _raise_fontkey)
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid,
+                                             "choices": {"0": {"family": "Lora", "wght": 999}}})
+    assert resp.status_code == 422 and "999" in resp.json()["detail"]["error"]
+
+
+def test_compose_happy(monkeypatch):
+    from recompose_core import ComposeResult
+    regions = [_region("abc", ranking=_rank(("Lora", 400, 0.8, False)))]
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    monkeypatch.setattr(srv, "compose_hybrid_svg",
+                        lambda *a, **k: ComposeResult("<svg/>", "#000", 1, 3,
+                                                      ["Lora:400 sha256:abcd"], [(0, 0, 100, 20)]))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid, "choices": {}})  # líder auto
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["svg"] == "<svg/>" and body["provenance"] == ["Lora:400 sha256:abcd"]
+    assert body["ignoradas"] == []
+
+
+def test_compose_ignoradas_en_respuesta(monkeypatch):
+    """choice sobre región no-recompuesta (handwriting) → aparece en ignoradas (espeja el [WARN]
+    del CLI, no se traga). Hay otra región recomponible para no caer en 422."""
+    from recompose_core import ComposeResult
+    regions = [_region("abc", ranking=_rank(("Lora", 400, 0.8, False))),     # leader → recompone
+               _region("libre", classification="handwriting", score=0.2)]    # no recompone
+    sid = srv._put(srv.Session(_dummy_raster(), regions, 100, 20))
+    monkeypatch.setattr(srv, "compose_hybrid_svg",
+                        lambda *a, **k: ComposeResult("<svg/>", "#000", 1, 3, [], [(0, 0, 100, 20)]))
+    client = TestClient(srv.app)
+    resp = client.post("/api/compose", json={"imageId": sid,
+                                             "choices": {"1": {"family": "Lora", "wght": 400}}})
+    assert resp.status_code == 200
+    assert resp.json()["ignoradas"] == [{"index": 1, "text": "libre"}]
