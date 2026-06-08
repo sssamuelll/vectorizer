@@ -151,6 +151,21 @@ def test_analyze_colorwarning_presente(monkeypatch):
     assert cw is not None and "20" in cw
 
 
+def test_analyze_runtimeerror_503(monkeypatch):
+    """analyze_regions lanza RuntimeError (OCR sin idioma / metadata GF caída cold-cache)
+    → 503 con envelope, no un 500 crudo (el CLI lo atrapa, el server también)."""
+    monkeypatch.setattr(srv, "load_image_bgr_from_bytes", lambda d: _dummy_raster())
+    monkeypatch.setattr(srv, "count_effective_colors", lambda r: 3)
+
+    def _boom(r):
+        raise RuntimeError("metadata GF no disponible")
+
+    monkeypatch.setattr(srv, "analyze_regions", _boom)
+    client = TestClient(srv.app)
+    resp = client.post("/api/analyze", files={"file": ("x.png", b"d", "image/png")})
+    assert resp.status_code == 503 and "metadata" in resp.json()["detail"]["error"]
+
+
 def _raise_fontkey(*a, **k):
     raise srv.FontKeyError("peso 999 no disponible para 'Lora'; disponibles: [400]")
 

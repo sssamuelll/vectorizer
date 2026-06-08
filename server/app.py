@@ -85,7 +85,12 @@ def analyze(file: UploadFile = File(...)):
     n = count_effective_colors(raster)
     color_warning = (f"~{n} colores efectivos — recompose asume UNA tinta"
                      if n > COLOR_WARN_THRESHOLD else None)
-    regions = analyze_regions(raster)
+    try:
+        regions = analyze_regions(raster)
+    except RuntimeError as e:
+        # OCR sin idioma latino / falla en runtime / metadata GF caída cold-cache.
+        # El CLI lo atrapa (recompose.py); aquí → 503, no un 500 crudo sin envelope.
+        raise HTTPException(status_code=503, detail={"error": str(e)})
     h, w = raster.shape[:2]
     sid = _put(Session(raster, regions, w, h))
     out = []
