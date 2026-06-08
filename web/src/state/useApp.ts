@@ -31,6 +31,7 @@ export type Action =
   | { type: 'COMPOSED'; resp: ComposeResponse }
   | { type: 'FAIL'; status: number; message: string; origin: ErrorOrigin }
   | { type: 'RETRY' }
+  | { type: 'BACK' }
   | { type: 'RESET' }
 
 export const initialState: AppState = {
@@ -84,6 +85,8 @@ export function reducer(state: AppState, action: Action): AppState {
       if (state.error.origin === 'compose') return { ...state, phase: 'choosing', error: null }
       return { ...state, phase: 'idle', error: null }
     }
+    case 'BACK':
+      return state.phase === 'done' ? { ...state, phase: 'choosing' } : state
     case 'RESET':
       return { ...initialState, overlayCache: new Map(), reqSeq: state.reqSeq + 1 }
     default:
@@ -150,6 +153,7 @@ export function useApp() {
     arm: (c: { family: string; wght: number } | null) => dispatch({ type: 'ARM', choice: c }),
     choose: (i: number, c: { family: string; wght: number }) => dispatch({ type: 'CHOOSE', index: i, choice: c }),
     retry: () => dispatch({ type: 'RETRY' }),
+    back: () => dispatch({ type: 'BACK' }),
     reset: () => dispatch({ type: 'RESET' }),
   }
 }

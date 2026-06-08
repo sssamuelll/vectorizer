@@ -20,7 +20,7 @@ export default function App() {
   else if (s.phase === 'empty') main = <EmptyState onReset={app.reset} />
   else if (s.phase === 'choosing') main = <ChooseScreen state={s} onArm={app.arm} onChoose={app.choose} />
   else if (s.phase === 'composing') main = <Analyzing file="componiendo…" />
-  else if (s.phase === 'done' && s.result) main = <ComposeScreen result={s.result} onBack={() => app.setActive(s.activeRegion ?? 0)} />
+  else if (s.phase === 'done' && s.result) main = <ComposeScreen result={s.result} onBack={app.back} />
   else if (s.phase === 'error' && s.error) main = (
     <div className="panel"><div className="inner">
       <div className="ico">!</div>

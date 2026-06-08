@@ -99,3 +99,14 @@ test('RESET vacía choices/analysis e incrementa reqSeq', () => {
   expect(Object.keys(r.choices)).toHaveLength(0)
   expect(r.reqSeq).toBe(s.reqSeq + 1)
 })
+
+test('BACK desde done vuelve a choosing preservando el resultado', () => {
+  let s = reducer(afterUpload(), { type: 'ANALYZED', resp: resp([tie(0)]), seq: 1 })
+  s = reducer(s, { type: 'CHOOSE', index: 0, choice: { family: 'A', wght: 400 } })
+  s = reducer(s, { type: 'COMPOSED', resp: { svg: '<svg/>', provenance: [], ignoradas: [] } })
+  expect(s.phase).toBe('done')
+  const back = reducer(s, { type: 'BACK' })
+  expect(back.phase).toBe('choosing')
+  expect(back.result).not.toBeNull()              // el resultado se preserva
+  expect(back.choices[0]).toEqual({ family: 'A', wght: 400 })  // la elección se preserva
+})
