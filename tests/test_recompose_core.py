@@ -202,7 +202,7 @@ def test_compose_svg_con_provenance():
 def test_compose_hybrid_svg_region_type_estructura():
     """compose_hybrid_svg sobre una región type: SVG con grupos ink+type,
     conteo de glifos, bbox de máscara y provenance con sha. La byte-identidad
-    contra el inline se verifica en Task 3 (gate de aceptación), no aquí."""
+    contra el inline es el gate de aceptación sobre el logo de Ale (Task 5), no aquí."""
     img = _logo_sintetico()
     r = _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3)
     res = recompose_core.compose_hybrid_svg(
