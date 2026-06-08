@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recompose
+import recompose_core
 import fontid
 
 
@@ -71,7 +72,7 @@ def test_reporte_costura_siempre_lista_todas(capsys):
                 ranking=_rank(("Lora", 400, 0.8, False))),
         _region(text="libre", classification="handwriting", score=0.2),
     ]
-    decisions = [recompose.seam_decision(r) for r in regs]
+    decisions = [recompose_core.seam_decision(r) for r in regs]
     recompose.print_seam_report(regs, decisions)
     out = capsys.readouterr().out
     assert "mente" in out and "libre" in out
