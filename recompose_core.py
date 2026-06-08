@@ -246,6 +246,17 @@ def resolve_choices(regions, choices):
     return ChoiceResolution(effective, recomp_idx, decisions, pendientes, ignoradas)
 
 
+def region_overlay_paths(region, family, wght, cache_dir):
+    """[(path_d, transform)] de UNA región con una candidata, en coords de imagen
+    completa — la unidad por región que compose_hybrid_svg usa, extraída para que
+    el overlay del backend (Spec C0) la reuse: el ojo juzga exactamente lo que
+    /compose va a producir. Devuelve (pairs, ttf_path); compose necesita el
+    ttf_path para el sha de procedencia. FontKeyError si la fuente falla."""
+    ttf = resolve_ttf(family, wght, cache_dir)
+    chars = [c for c in region.text if not c.isspace()]
+    return region_glyph_paths(ttf, chars, region.glyph_boxes, family), ttf
+
+
 def compose_hybrid_svg(img_bgr, regions, choices, recomp_idx, sigma, cache_dir):
     """Cableado de compose compartido (CLI y backend). Dado choices YA resueltos
     {idx: (family, wght)} y los índices a recomponer, compone el SVG híbrido.
@@ -260,11 +271,10 @@ def compose_hybrid_svg(img_bgr, regions, choices, recomp_idx, sigma, cache_dir):
     for i in recomp_idx:
         r = regions[i]
         family, wght = choices[i]
-        ttf = resolve_ttf(family, wght, cache_dir)
+        pairs, ttf = region_overlay_paths(r, family, wght, cache_dir)
         sha = hashlib.sha256(ttf.read_bytes()).hexdigest()[:16]
         provenance.append(f"{family}:{wght} sha256:{sha}")
-        chars = [c for c in r.text if not c.isspace()]
-        glyph_pairs.extend(region_glyph_paths(ttf, chars, r.glyph_boxes, family))
+        glyph_pairs.extend(pairs)
         mask_boxes.append(r.bbox)
     h, w = img_bgr.shape[:2]
     callig = calligraphy_paths(img_bgr, mask_boxes, sigma=sigma)
