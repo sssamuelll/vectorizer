@@ -1,9 +1,41 @@
 """Tests de recompose_core.py (compose compartido)."""
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recompose_core
+import fontid
+
+
+def _region(text="mente", bbox=(10, 10, 100, 40), classification="type",
+            score=0.9, n_glyphs=5, ranking=None):
+    gw = (bbox[2] - bbox[0]) // max(n_glyphs, 1)
+    boxes = [(bbox[0] + i * gw, bbox[1], bbox[0] + i * gw + gw - 2, bbox[3])
+             for i in range(n_glyphs)]
+    return fontid.RegionAnalysis(
+        bbox=bbox, text=text, classification=classification,
+        class_score=score, glyph_boxes=boxes, ranking=ranking or [])
+
+
+def _rank(*tuples):
+    return [fontid.RankEntry(f, w, s, t) for f, w, s, t in tuples]
+
+
+def _logo_sintetico():
+    img = np.full((120, 300, 3), 255, np.uint8)
+    cv2.ellipse(img, (150, 30), (100, 15), 0, 0, 360, (60, 110, 90), 6)
+    for x in (60, 130, 200):
+        cv2.rectangle(img, (x, 70), (x + 40, 110), (60, 110, 90), -1)
+    return img
+
+
+CACHE = Path.home() / ".cache" / "vectorizer-fonts"
+TTF_TEST = CACHE / "Cormorant_Garamond_500.ttf"
 
 
 # ── colocación (port verificado de scratch_perfect.py) ──────────────
@@ -29,3 +61,35 @@ def test_glyph_transform_alinea_centro_y_fondo():
     cx_render = tx + s * (fb[0] + fb[2]) / 2.0
     assert abs(cx_render - (gb[0] + gb[2]) / 2.0) < 1e-6
     assert abs((ty - s * fb[1]) - gb[3]) < 1e-6
+
+
+# ── compose_hybrid_svg (dueño del cableado) ─────────────────────────
+
+@pytest.mark.skipif(not TTF_TEST.exists(), reason="TTF de caché no disponible")
+def test_compose_hybrid_svg_reproduce_el_inline():
+    """compose_hybrid_svg produce el mismo SVG que el cableado inline del CLI
+    para una región type con líder — gate del levantamiento (Spec A §3)."""
+    img = _logo_sintetico()
+    r = _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3,
+                classification="type",
+                ranking=_rank(("Cormorant Garamond", 500, 0.8, False)))
+    res = recompose_core.compose_hybrid_svg(
+        img, [r], {0: ("Cormorant Garamond", 500)}, [0],
+        sigma=2.0, cache_dir=CACHE)
+    root = ET.fromstring(res.svg_text)
+    grupos = [g.get("class") for g in root if g.tag.endswith("g")]
+    assert "ink" in grupos and "type" in grupos
+    assert res.glyph_count == 3
+    assert res.mask_boxes == [(50, 60, 250, 115)]
+    assert res.provenance and "Cormorant Garamond:500 sha256:" in res.provenance[0]
+    assert "TTF provenance" in res.svg_text
+
+
+def test_compose_hybrid_svg_sin_regiones_solo_caligrafia():
+    """recomp_idx vacío → SVG con solo el grupo ink (caligrafía), sin glifos."""
+    img = _logo_sintetico()
+    res = recompose_core.compose_hybrid_svg(
+        img, [], {}, [], sigma=2.0, cache_dir=CACHE)
+    assert res.glyph_count == 0 and res.mask_boxes == []
+    assert res.provenance == []
+    ET.fromstring(res.svg_text)

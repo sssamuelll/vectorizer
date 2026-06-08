@@ -8,8 +8,7 @@ desde TTF, caligrafía vectorizada, compositor SVG, y el cableado de compose
 Dependencia unidireccional: este módulo NO importa de recompose.py.
 Superficie de import CERRADA (test AST la vigila):
   fontid:    download_family_weights
-  vectorize: clean_binary_mask, trace_contours
-  (extract_stroke_color entra con compose_hybrid_svg en Task 2)
+  vectorize: clean_binary_mask, extract_stroke_color, trace_contours
 """
 import hashlib
 import xml.etree.ElementTree as ET
@@ -23,7 +22,7 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.ttLib import TTFont
 
 from fontid import download_family_weights
-from vectorize import clean_binary_mask, trace_contours
+from vectorize import clean_binary_mask, extract_stroke_color, trace_contours
 
 # precondición una tinta (spec §7)
 COLOR_WARN_THRESHOLD = 12
@@ -199,3 +198,43 @@ def compose_svg(w, h, ink, callig_paths, glyph_pairs, provenance=None):
     for d, tr in glyph_pairs:
         ET.SubElement(g_type, "path", {"d": d, "transform": tr})
     return ET.tostring(svg, encoding="unicode")
+
+
+@dataclass
+class ComposeResult:
+    """Salida del compose híbrido — interfaz para CLI (imprime stats) y backend
+    (devuelve svg + provenance)."""
+    svg_text: str
+    ink: str
+    callig_count: int
+    glyph_count: int
+    provenance: list      # [str] «familia:peso sha256:<hex>»
+    mask_boxes: list      # [bbox] de las regiones recompuestas
+
+
+def compose_hybrid_svg(img_bgr, regions, choices, recomp_idx, sigma, cache_dir):
+    """Cableado de compose compartido (CLI y backend). Dado choices YA resueltos
+    {idx: (family, wght)} y los índices a recomponer, compone el SVG híbrido.
+    Dueño único de la política de compose. Lanza FontKeyError si el TTF falla —
+    el orquestador decide cómo presentarlo (CLI: exit 4; backend: HTTP).
+
+    Levantado verbatim del bloque inline de main() en recompose.py."""
+    cache_dir = Path(cache_dir)
+    glyph_pairs = []
+    mask_boxes = []
+    provenance = []
+    for i in recomp_idx:
+        r = regions[i]
+        family, wght = choices[i]
+        ttf = resolve_ttf(family, wght, cache_dir)
+        sha = hashlib.sha256(ttf.read_bytes()).hexdigest()[:16]
+        provenance.append(f"{family}:{wght} sha256:{sha}")
+        chars = [c for c in r.text if not c.isspace()]
+        glyph_pairs.extend(region_glyph_paths(ttf, chars, r.glyph_boxes, family))
+        mask_boxes.append(r.bbox)
+    h, w = img_bgr.shape[:2]
+    callig = calligraphy_paths(img_bgr, mask_boxes, sigma=sigma)
+    ink = extract_stroke_color(img_bgr, binary_ink_mask(img_bgr))
+    svg_text = compose_svg(w, h, ink, callig, glyph_pairs, provenance=provenance)
+    return ComposeResult(svg_text, ink, len(callig), len(glyph_pairs),
+                         provenance, mask_boxes)
