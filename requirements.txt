@@ -13,3 +13,9 @@ winocr
 anthropic
 fonttools>=4.60          # recompose.py: outlines de glifos desde TTF
 # resvg_py — OPCIONAL: solo el preview de recompose.py (pip install resvg_py)
+# server (Spec B1 — backend FastAPI loopback):
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9   # uploads multipart de /api/analyze
+# dev: httpx para fastapi.testclient
+httpx>=0.27
