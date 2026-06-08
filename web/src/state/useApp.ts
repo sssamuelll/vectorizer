@@ -1,3 +1,5 @@
+import { useEffect, useReducer, useRef } from 'react'
+import * as api from '../api/client'
 import type { AnalyzeResponse, Choice, ComposeResponse, GlyphPath, Region } from '../api/types'
 
 export type Phase = 'idle' | 'analyzing' | 'choosing' | 'empty' | 'composing' | 'done' | 'error'
@@ -86,5 +88,68 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...initialState, overlayCache: new Map(), reqSeq: state.reqSeq + 1 }
     default:
       return state
+  }
+}
+
+export function useApp() {
+  const [state, dispatch] = useReducer(reducer, initialState)
+  const ref = useRef(state); ref.current = state
+
+  // analyze al entrar a 'analyzing'
+  useEffect(() => {
+    if (state.phase !== 'analyzing' || !state.file) return
+    const seq = state.reqSeq; let live = true
+    api.analyze(state.file)
+      .then(resp => { if (live) dispatch({ type: 'ANALYZED', resp, seq }) })
+      .catch(e => { if (live) dispatch({ type: 'FAIL', status: e?.status ?? 0, message: e?.message ?? 'error', origin: 'analyze' }) })
+    return () => { live = false }
+  }, [state.phase, state.reqSeq])
+
+  // console.warn del colorWarning (banner visible = C1b)
+  useEffect(() => {
+    if (state.phase !== 'choosing' && state.phase !== 'empty') return
+    if (state.analysis?.colorWarning) console.warn(state.analysis.colorWarning)
+  }, [state.analysis])
+
+  // prefetch overlays de la región activa (tie)
+  useEffect(() => {
+    const s = ref.current
+    if (s.phase !== 'choosing' || s.activeRegion == null || !s.analysis) return
+    const region = s.analysis.regions.find(r => r.index === s.activeRegion)
+    if (!region || region.decision !== 'tie') return
+    const imageId = s.analysis.imageId
+    region.candidates.forEach(c => {
+      const choice = { family: c.family, wght: c.wght }
+      const key = cacheKey(imageId, region.index, choice)
+      if (s.overlayCache.has(key)) return
+      api.overlay({ imageId, regionIndex: region.index, family: c.family, wght: c.wght })
+        .then(r => dispatch({ type: 'OVERLAY_FETCHED', key, glyphs: r.glyphs, imageId }))
+        .catch(() => { /* overlay fail es local: la candidata no previsualiza */ })
+    })
+  }, [state.phase, state.activeRegion, state.analysis])
+
+  const upload = (file: File) => {
+    if (ref.current.phase === 'analyzing') return
+    const prev = ref.current.objectURL; if (prev) URL.revokeObjectURL(prev)
+    dispatch({ type: 'UPLOAD', file, objectURL: URL.createObjectURL(file) })
+  }
+  const download = () => {
+    const s = ref.current
+    if (s.phase === 'composing' || !s.analysis) return
+    dispatch({ type: 'COMPOSING' })
+    const choices: Record<string, { family: string; wght: number }> = {}
+    s.analysis.regions.forEach(r => { if (r.decision === 'tie' && s.choices[r.index]) choices[String(r.index)] = s.choices[r.index] })
+    api.compose({ imageId: s.analysis.imageId, choices })
+      .then(resp => dispatch({ type: 'COMPOSED', resp }))
+      .catch(e => dispatch({ type: 'FAIL', status: e?.status ?? 0, message: e?.message ?? 'error', origin: 'compose' }))
+  }
+  return {
+    state,
+    upload, download,
+    setActive: (i: number) => dispatch({ type: 'SET_ACTIVE', index: i }),
+    arm: (c: { family: string; wght: number } | null) => dispatch({ type: 'ARM', choice: c }),
+    choose: (i: number, c: { family: string; wght: number }) => dispatch({ type: 'CHOOSE', index: i, choice: c }),
+    retry: () => dispatch({ type: 'RETRY' }),
+    reset: () => dispatch({ type: 'RESET' }),
   }
 }
