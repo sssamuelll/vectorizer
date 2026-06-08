@@ -242,7 +242,15 @@ def _atomic_write(dest, data, validate=None):
     try:
         if validate is not None and not validate(tmp):
             return False
-        os.replace(tmp, dest)
+        try:
+            os.replace(tmp, dest)
+        except PermissionError:
+            # Windows: otro hilo ganó la carrera y tiene `dest` bloqueado/escrito.
+            # Si `dest` ya existe (lo promovió el ganador), es éxito — el perdedor
+            # acepta el archivo del ganador en vez de lanzar. Si no existe, propaga.
+            if dest.exists():
+                return True
+            raise
         return True
     finally:
         if tmp.exists():
