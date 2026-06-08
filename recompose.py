@@ -22,36 +22,14 @@ from recompose_core import (CALLIG_RDP, CALLIG_CHAIKIN, CALLIG_TENSION,
                             COLOR_WARN_THRESHOLD, MASK_PAD, FontKeyError,
                             SeamDecision, binary_ink_mask, calligraphy_paths,
                             common_scale, compose_svg, glyph_transform,
-                            region_glyph_paths, seam_decision)
-from fontid import CACHE_DIR_DEFAULT, analyze_regions, download_family_weights
+                            region_glyph_paths, resolve_ttf, seam_decision)
+from fontid import CACHE_DIR_DEFAULT, analyze_regions
 from vectorize import count_effective_colors, extract_stroke_color, load_image_bgr
 
 # exit codes (spec §7) — CLI-only
 EXIT_NADA_QUE_RECOMPONER = 2
 EXIT_EMPATE_PENDIENTE = 3
 EXIT_FONT_KEY = 4
-
-
-def resolve_ttf(family, wght, cache_dir):
-    """TTF de familia:peso — caché primero, descarga on-demand después.
-    La familia puede NO estar en el ranking (regla de soberanía: el ojo
-    elige fuera del menú — caso Nanum Myeongjo). Peso inexistente →
-    FontKeyError con los disponibles."""
-    # Sanitizar la clave de caché: rechazar ruta traversal (spec HF5)
-    if any(sep in family for sep in ("/", "\\", "..")) or family != family.strip():
-        raise FontKeyError(f"nombre de familia inválido: {family!r}")
-
-    cache_dir = Path(cache_dir)
-    cached = cache_dir / f"{family.replace(' ', '_')}_{wght}.ttf"
-    if cached.exists():
-        return cached
-    weights = download_family_weights(family, cache_dir)
-    for w, path in weights:
-        if w == wght:
-            return path
-    disponibles = sorted(w for w, _ in weights) or "ninguno (¿red caída o familia inexistente en GF?)"
-    raise FontKeyError(
-        f"peso {wght} no disponible para {family!r}; disponibles: {disponibles}")
 
 
 def _norm_key(s):
