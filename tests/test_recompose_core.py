@@ -48,6 +48,14 @@ def test_common_scale_mediana():
     assert abs(s - 0.15) < 1e-9
 
 
+def test_common_scale_sin_altura_util_es_fontkey():
+    """Sin glifos de altura > 0 no hay escala → FontKeyError, no ValueError pelado.
+    Así /compose y /api/overlay (que solo atrapan FontKeyError) lo presentan como
+    422 limpio en vez de un 500 crudo sin envelope. El CLI ya atrapaba ambos."""
+    with pytest.raises(recompose_core.FontKeyError):
+        recompose_core.common_scale([(0, 0, 100, 0)], [(0, 0, 10, 20)])
+
+
 def test_glyph_transform_alinea_centro_y_fondo():
     """El bbox renderizado debe calzar centro-x y fondo del box original
     (overshoot incluido) — la verificación 0.0px del prototipo, como assert."""
@@ -286,3 +294,46 @@ def test_resolve_choices_multiregion_indexa_correcto():
     assert res.ignoradas == [1]               # choice sobre handwriting
     assert [i for i, _ in res.pendientes] == [2]
     assert res.effective == {0: ("Lora", 400)}  # líder de r0; r2 pendiente; 1 excluida
+
+
+# ── region_overlay_paths: la unidad por región compartida con el overlay (C0) ──
+
+def test_region_overlay_paths_reusa_resolve_y_glyph_paths(monkeypatch):
+    """region_overlay_paths = resolve_ttf + (quita espacios) + region_glyph_paths.
+    Offline: espía las dos dependencias y verifica el cableado y los args exactos."""
+    r = _region(text="ab c", n_glyphs=3)          # 3 chars sin-espacio, 3 boxes
+    visto = {}
+
+    def fake_glyph_paths(ttf, chars, boxes, family):
+        visto["ttf"], visto["chars"] = ttf, chars
+        visto["boxes"], visto["family"] = boxes, family
+        return [("M0Z", "matrix(1)"), ("M1Z", "matrix(2)"), ("M2Z", "matrix(3)")]
+
+    monkeypatch.setattr(recompose_core, "resolve_ttf",
+                        lambda fam, w, cd: Path("/fake/Cormorant_500.ttf"))
+    monkeypatch.setattr(recompose_core, "region_glyph_paths", fake_glyph_paths)
+
+    pairs, ttf = recompose_core.region_overlay_paths(r, "Cormorant Garamond", 500, "/cache")
+    assert ttf == Path("/fake/Cormorant_500.ttf")
+    assert pairs == [("M0Z", "matrix(1)"), ("M1Z", "matrix(2)"), ("M2Z", "matrix(3)")]
+    assert visto["chars"] == ["a", "b", "c"]       # el espacio se quitó (política única)
+    assert visto["boxes"] == r.glyph_boxes
+    assert visto["family"] == "Cormorant Garamond"
+    assert visto["ttf"] == Path("/fake/Cormorant_500.ttf")
+
+
+@pytest.mark.skipif(not TTF_TEST.exists(), reason="TTF de caché no disponible")
+def test_region_overlay_paths_identico_a_compose_type():
+    """LA prueba de fidelidad: los pairs de region_overlay_paths == los paths del
+    <g class='type'> que compose_hybrid_svg produce para esa región+candidata.
+    El ojo (overlay) juzga exactamente lo que se descarga (compose)."""
+    img = _logo_sintetico()
+    r = _region(text="abc", bbox=(50, 60, 250, 115), n_glyphs=3)
+    pairs, _ = recompose_core.region_overlay_paths(r, "Cormorant Garamond", 500, CACHE)
+    res = recompose_core.compose_hybrid_svg(
+        img, [r], {0: ("Cormorant Garamond", 500)}, [0], sigma=2.0, cache_dir=CACHE)
+    root = ET.fromstring(res.svg_text)
+    type_g = next(g for g in root
+                  if g.tag.endswith("g") and g.get("class") == "type")
+    compose_pairs = [(p.get("d"), p.get("transform")) for p in type_g]
+    assert pairs == compose_pairs and len(pairs) == 3
