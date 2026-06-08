@@ -233,7 +233,12 @@ def _atomic_write(dest, data, validate=None):
     """Promueve `data` a `dest` atómicamente vía tempfile ÚNICO en el mismo
     directorio (seguro bajo concurrencia: cada escritor tiene su propio .tmp,
     sin colisión de nombre). `validate(tmp_path)->bool`; si False, no promueve.
-    Devuelve True si `dest` quedó escrito."""
+    Devuelve True si `dest` quedó escrito.
+
+    INVARIANTE de los llamadores: `dest` debe ser direccionado-por-contenido
+    (mismo destino ⇒ mismos bytes). El manejo de la carrera en Windows hace que
+    el hilo perdedor ACEPTE el archivo del ganador — seguro solo si ambos
+    escriben lo mismo (lo es: TTF/metadata cacheados por familia+peso)."""
     dest = Path(dest)
     with tempfile.NamedTemporaryFile(dir=str(dest.parent), suffix=".tmp",
                                      delete=False) as tf:
