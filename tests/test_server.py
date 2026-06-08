@@ -127,3 +127,25 @@ def test_decision_band_cap_4():
         ("D", 400, 0.78, True), ("E", 400, 0.775, True)))
     kind, band, chosen, reason = srv._decision(r)
     assert kind == "tie" and len(band) == 4
+
+
+def test_analyze_sin_regiones_200_vacio(monkeypatch):
+    """Sin regiones detectadas → 200 con regions vacío (no es error)."""
+    monkeypatch.setattr(srv, "load_image_bgr_from_bytes", lambda d: _dummy_raster())
+    monkeypatch.setattr(srv, "count_effective_colors", lambda r: 3)
+    monkeypatch.setattr(srv, "analyze_regions", lambda r: [])
+    client = TestClient(srv.app)
+    resp = client.post("/api/analyze", files={"file": ("x.png", b"d", "image/png")})
+    assert resp.status_code == 200 and resp.json()["regions"] == []
+
+
+def test_analyze_colorwarning_presente(monkeypatch):
+    """count_effective_colors > umbral → colorWarning no-null (la única rama del aviso)."""
+    monkeypatch.setattr(srv, "load_image_bgr_from_bytes", lambda d: _dummy_raster())
+    monkeypatch.setattr(srv, "count_effective_colors", lambda r: 20)
+    monkeypatch.setattr(srv, "analyze_regions", lambda r: [])
+    client = TestClient(srv.app)
+    resp = client.post("/api/analyze", files={"file": ("x.png", b"d", "image/png")})
+    assert resp.status_code == 200
+    cw = resp.json()["colorWarning"]
+    assert cw is not None and "20" in cw
