@@ -30,15 +30,9 @@ import xml.etree.ElementTree as ET
 # 0. CARGA DE IMAGEN (política de alpha compartida)
 # ═══════════════════════════════════════════════════════════════════
 
-def load_image_bgr(image_path):
-    """Carga una imagen como BGR uint8, componiendo alpha sobre blanco.
-
-    cv2.imread por defecto descarta el canal alpha: un PNG transparente
-    entra con fondo negro basura. Aquí: IMREAD_UNCHANGED + composición
-    sobre blanco. Una sola política para todos los pipelines.
-    Devuelve None si la imagen no se puede cargar (igual que cv2.imread).
-    """
-    img = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+def _bgr_from_decoded(img):
+    """Política compartida alpha/bit-depth/gris sobre un array ya decodificado
+    (salida de imread o imdecode con IMREAD_UNCHANGED). None si img es None."""
     if img is None:
         return None
     if img.dtype == np.uint16:                    # PNG de 16 bits → 8 bits
@@ -50,6 +44,20 @@ def load_image_bgr(image_path):
         bgr = img[:, :, :3].astype(np.float64)
         return (bgr * alpha + 255.0 * (1.0 - alpha)).astype(np.uint8)
     return img
+
+
+def load_image_bgr(image_path):
+    """Carga una imagen como BGR uint8, componiendo alpha sobre blanco.
+    Devuelve None si la imagen no se puede cargar (igual que cv2.imread)."""
+    return _bgr_from_decoded(cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED))
+
+
+def load_image_bgr_from_bytes(data):
+    """Decodifica bytes (upload multipart) con la MISMA política que load_image_bgr.
+    Medido byte-idéntico a load_image_bgr(path) para PNG/JPEG/EXIF/alpha
+    (IMREAD_UNCHANGED ignora EXIF en imread e imdecode por igual)."""
+    arr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
+    return _bgr_from_decoded(arr)
 
 
 # ═══════════════════════════════════════════════════════════════════
