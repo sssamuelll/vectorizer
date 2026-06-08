@@ -70,7 +70,7 @@ def common_scale(font_bboxes, glyph_boxes):
               for fb, (x0, y0, x1, y1) in zip(font_bboxes, glyph_boxes)
               if fb is not None and fb[3] - fb[1] > 0]
     if not ratios:
-        raise ValueError("ningún glifo con bbox válido para la escala")
+        raise FontKeyError("ningún glifo con bbox válido para la escala")
     return float(np.median(ratios))
 
 

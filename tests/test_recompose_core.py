@@ -48,6 +48,14 @@ def test_common_scale_mediana():
     assert abs(s - 0.15) < 1e-9
 
 
+def test_common_scale_sin_altura_util_es_fontkey():
+    """Sin glifos de altura > 0 no hay escala → FontKeyError, no ValueError pelado.
+    Así /compose y /api/overlay (que solo atrapan FontKeyError) lo presentan como
+    422 limpio en vez de un 500 crudo sin envelope. El CLI ya atrapaba ambos."""
+    with pytest.raises(recompose_core.FontKeyError):
+        recompose_core.common_scale([(0, 0, 100, 0)], [(0, 0, 10, 20)])
+
+
 def test_glyph_transform_alinea_centro_y_fondo():
     """El bbox renderizado debe calzar centro-x y fondo del box original
     (overshoot incluido) — la verificación 0.0px del prototipo, como assert."""
