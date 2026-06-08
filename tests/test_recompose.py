@@ -9,7 +9,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import recompose
-import recompose_core
 import fontid
 
 
