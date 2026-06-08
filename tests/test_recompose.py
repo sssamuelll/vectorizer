@@ -214,32 +214,42 @@ def test_main_font_a_region_no_recompuesta_avisa(monkeypatch, tmp_path, capsys):
 
 # ── frontera mecánica de imports (spec §4: el CI cierra, no la prosa) ──
 
-ALLOWED_INTERNAL_IMPORTS = {
-    "fontid": {"analyze_regions", "download_family_weights",
-               "CACHE_DIR_DEFAULT"},
-    "vectorize": {"load_image_bgr", "trace_contours",
-                  "extract_stroke_color", "clean_binary_mask",
-                  "count_effective_colors"},
+ALLOWED_IMPORTS = {
+    "recompose.py": {
+        "fontid": {"analyze_regions", "CACHE_DIR_DEFAULT"},
+        "vectorize": {"load_image_bgr", "count_effective_colors"},
+    },
+    "recompose_core.py": {
+        "fontid": {"download_family_weights"},
+        "vectorize": {"clean_binary_mask", "extract_stroke_color", "trace_contours"},
+        "recompose": set(),   # el core JAMÁS importa del CLI (unidireccional)
+    },
 }
 
 
-def test_superficie_de_imports_cerrada():
-    """La superficie declarada en el spec, vigilada por AST. Ampliar la
-    lista exige editar el spec Y este test — a propósito."""
+def _violaciones_de_superficie(filename, allow):
     import ast
-    src = (Path(__file__).resolve().parent.parent / "recompose.py")
+    src = (Path(__file__).resolve().parent.parent / filename)
     tree = ast.parse(src.read_text(encoding="utf-8"))
-    violaciones = []
+    out = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in ALLOWED_INTERNAL_IMPORTS:
-            extra = ({a.name for a in node.names}
-                     - ALLOWED_INTERNAL_IMPORTS[node.module])
+        if isinstance(node, ast.ImportFrom) and node.module in allow:
+            extra = {a.name for a in node.names} - allow[node.module]
             if extra:
-                violaciones.append(f"{node.module}: {sorted(extra)}")
+                out.append(f"{filename}:{node.module}: {sorted(extra)}")
         if isinstance(node, ast.Import):
             for a in node.names:
-                if a.name in ALLOWED_INTERNAL_IMPORTS:
-                    violaciones.append(f"import {a.name} completo (prohibido)")
+                if a.name in allow:
+                    out.append(f"{filename}: import {a.name} completo (prohibido)")
+    return out
+
+
+def test_superficie_de_imports_cerrada():
+    """La superficie declarada en el spec, vigilada por AST en AMBOS archivos.
+    Ampliar la lista exige editar el spec Y este test — a propósito."""
+    violaciones = []
+    for fname, allow in ALLOWED_IMPORTS.items():
+        violaciones += _violaciones_de_superficie(fname, allow)
     assert not violaciones, f"superficie de import violada: {violaciones}"
 
 
