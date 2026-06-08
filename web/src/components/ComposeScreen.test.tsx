@@ -20,3 +20,9 @@ test('renderiza el SVG aislado (img blob) y un enlace de descarga', () => {
   expect(link.getAttribute('download')).toMatch(/\.svg$/)
   expect(screen.getByText(/DM Serif Display:400/)).toBeInTheDocument()   // provenance
 })
+
+test('revoca el blob URL al desmontar (cleanup)', () => {
+  const { unmount } = render(<ComposeScreen result={result} onBack={() => {}} />)
+  unmount()
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:svg')
+})
