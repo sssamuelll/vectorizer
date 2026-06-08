@@ -23,3 +23,11 @@ def test_store_clear_vacia():
     nuevo = srv._put(srv.Session(object(), [], 1, 1))
     assert srv._get(nuevo) is not None     # sigue funcionando tras clear
     srv._clear()
+
+
+def test_store_put_ids_distintos():
+    """Dos _put → imageIds distintos (no singleton, contrato del uuid)."""
+    a = srv._put(srv.Session(object(), [], 1, 1))
+    b = srv._put(srv.Session(object(), [], 1, 1))
+    assert a != b
+    srv._clear()
