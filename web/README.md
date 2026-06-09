@@ -16,6 +16,9 @@ The React Compiler is not enabled on this template because of its impact on dev 
 If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
 
 ```js
+import { defineConfig, globalIgnores } from '@eslint/config'
+import tseslint from 'typescript-eslint'
+
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -47,6 +50,8 @@ You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-re
 
 ```js
 // eslint.config.js
+import { defineConfig, globalIgnores } from '@eslint/config'
+import tseslint from 'typescript-eslint'
 import reactX from 'eslint-plugin-react-x'
 import reactDom from 'eslint-plugin-react-dom'
 

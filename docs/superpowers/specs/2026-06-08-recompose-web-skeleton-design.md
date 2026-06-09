@@ -123,7 +123,7 @@ type ComposeResponse = { svg: string; provenance: string[]; ignoradas: { index: 
 
 ### Componer y descargar (`ComposeScreen.tsx`)
 
-Inyecta el SVG real de `result.svg` (`dangerouslySetInnerHTML` u objeto SVG) — **aquí ocurre la regresión de juicio: el ojo re-juzga el render de Blink**. Riesgo notado por la junta: el `<style>` del SVG inyectado trae selectores globales `.ink`/`.type`; **renderizar el SVG aislado** (en un `<iframe>`/`shadow root`/`<img src=blob>`, no inyectado crudo en el árbol de la app) para que su stylesheet no pise las clases de la app. "Descargar SVG" baja un `Blob([result.svg], {type:"image/svg+xml"})`. Muestra `provenance` (e `ignoradas`, que en el happy path de C1a debe venir **vacío** — no-vacío señalaría un bug del front, no display normal).
+Renderiza el SVG real de `result.svg` **aislado** (usando `<img src=blob>`, un `<iframe>`, o un shadow root) — así ocurre la regresión de juicio (el ojo re-juzga el render de Blink) sin que el `<style>` global del SVG (selectores `.ink`/`.type`) contamine las clases de la app. "Descargar SVG" baja un `Blob([result.svg], {type:"image/svg+xml"})`. Muestra `provenance` e **`ignoradas`** — en el happy path de C1a el campo `ignoradas` debe venir **vacío**; mostrarlo permite detectar bugs si el front mandó elecciones que el backend descartó (no-vacío señalaría un bug de integración, no display normal).
 
 ## 5. Manejo de error (determinista)
 

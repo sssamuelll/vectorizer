@@ -18,6 +18,8 @@
 
 ---
 
+## Tasks
+
 ### Task 1: Scaffold `web/` (Vite + React + TS + Vitest) + ported stylesheet + smoke test
 
 **Files:**
